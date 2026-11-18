@@ -20,9 +20,12 @@ maintainer explicitly opens the publish gate.
 The `feature/**` form includes nested names such as `feature/audio/mixer`. Tag pushes are included
 so that the `release` job in section 2 can run; without a tag trigger the job would never execute.
 
-`concurrency` groups runs by workflow and ref with `cancel-in-progress: true`, so a superseded push
-to the same branch cancels the previous run. Workflow-level permissions are `contents: read`; only
-the release job raises them.
+`concurrency` groups runs by workflow and ref. Runs are **not** cancelled when a newer push
+arrives: the self-hosted runner removes its temporary directory when a job ends, and a cancelled
+job that is still cleaning up deletes the temp directory of the next job, which then fails its
+checkout with `could not lock config file .../_temp/<id>/.gitconfig: No such file or directory`. The
+`build` job also recreates `$RUNNER_TEMP` before the checkout, so a stray cleanup cannot break it.
+Workflow-level permissions are `contents: read`; only the release job raises them.
 
 ## 2. Jobs
 

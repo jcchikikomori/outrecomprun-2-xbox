@@ -87,33 +87,57 @@ coincidence; the cached value is a vertex size, not a projection scale).
 
 ## Fix
 
-A [[hook]] runs at `0x00195D09`, immediately after `FUN_00195CF0`'s call to `FUN_0019E9E0` and before the
-cache is read, and describes the draw as the single interleaved user-pointer stream it is:
+`D3DDevice_DrawIndexedVerticesUP` (`0x00195CF0`) itself is wrapped in `src/game/hooks.cpp` (no
+`[[hook]]` entry needed: the recompiled body is a weak symbol). At its first act, before the guest body
+calls `FUN_0019E9E0` and divides by the cache, the hook does what the guest's own `SetVertexShader` and
+`FUN_0019E9E0` would have done for the bound FVF:
 
-* `config/outrun2.toml`: `[[hook]] at = 0x00195D09, call = "FixIndexedVerticesUpLayout"`.
-* `src/game/hooks.cpp`: reads the fifth argument (stride, `[ebp+0x18]`) and writes
-  `0x001A4D18 = stride/4`, `0x001A4D1C = 0`, `0x001A4D20 = -stride`, `0x001A4D24 = stride/4`,
-  `0x001A4D28 = 0`, `0x001A4DA4 = 1`. It logs once:
-  `hooks: 00195CF0 vertex layout 10 dwords (stride 40), cached at 001A4D18`.
+* reads the bound FVF handle from `d3d::State().vs_handle` (a vertex shader program, handle bit 0 set,
+  needs none of this and is left alone);
+* builds the FVF's declaration records locally with `FUN_00196200`'s writes (decompiled and replicated:
+  XYZ/XYZRHW/blends at slots 0-1, NORMAL 2, DIFFUSE 3, SPECULAR 4, texture stages from slot 9);
+* caches them with `FUN_0019E9E0`'s own arithmetic into the CDevice fields
+  `+0xBC8` (total dwords), `+0xBCC` (first offset), `+0xBD0` (first minus end), `+0xBD4`… (size, gap
+  pairs) and `+0xC54` (input count), and stores the object/handle pair at `+0x794`/`+0x798` as the
+  guest setter would have.
 
-The hook only changes the cached layout (which the HLE no longer maintains); the guest draw code, the HLE
-state and the pushed vertex data are untouched. Other modes use the same helper through the same call site,
-so they get the same per-draw stride.
+The declaration is built **in host memory, not in the object at `0x001A67C8`**: that object is shared
+with the SDK's own HLE, which points the device's vertex-shader field at it
+(`SetDev(XDK_CDevice_VertexShader, SYM(D3D_FvfShader))`, `sdk/runtime/xdk/d3d8.cpp:619`) and keeps its
+own *widened* declaration there (immediate-data slots added; measured at draw time: XYZRHW at 0x24 and
+six 2-dword texcoord records, 25 dwords in total). An earlier variant that called the guest's
+`FUN_00196200` through `hle::Call` never landed, and caching the SDK's widened declaration removed the
+trap but made the draw's vertex copy read 100 bytes per 40-byte vertex.
+
+For FVF `0x1D2` the cache is by construction **10 dwords (0x28 bytes), one contiguous input at offset
+0** - exactly the stride the title passes to the draw. The hook logs once:
+
+```
+hooks: 00195CF0 layout 10 dwords, 1 inputs, first 0, end 40 from [0]=0/32 [2]=12/32 [3]=24/40 [4]=28/40 [9]=32/22
+hooks: 00195CF0 cached the FVF 1D2 layout for the draw's vertex copy
+```
+
+The guest draw code, the HLE state and the pushed vertex data are untouched; other modes reach the same
+helper through the same call site and get the same treatment for their own FVF.
 
 ## Reproduction (headless)
 
 ```
-sdk/harness/build.sh -r . -g generated/game -o .local/harness -n game      # in scripts/container's image
-mkdir run && cp -a .local/playtest/OutRun2-Offline/hdd run/                # a profile, as the reporter had
+scripts/container.sh harness 60 scripts/pad/none.txt                          # build and run in the image
+# or, driving the menus from a script:
+mkdir run && cp -a .local/playtest/OutRun2-Offline/hdd run/                   # a profile, as the reporter had
 cd run && SCRIPT=<repo>/scripts/pad/none.txt .local/harness/game <game folder with default.xbe + media/*.cvm>
 ```
 
 The pad script cannot drive the menus because a static screen stops presenting and its vblank clock stops
 with it; write `cmd` files into the run folder instead (`buttons [vblanks held]`), cycling
-`START`/`A`/`DOWN` every few seconds. The harness sometimes stalls on the intro in this environment
-(all guest threads idle, no presents; also seen before this fix, with the pre-fix binary). Several
-attempts were needed for every successful run: the 4th before the fix (the trap log), and the 6th and
-3rd after it (the log and the frame captures below).
+`START`/`A`/`DOWN` every few seconds. The harness also fails to start in a *majority* of attempts: the
+title runs out of its own heap during the boot voice-bank load (`__break("OUT OF MEMORY")` at
+`0x000ccfb0`, a ~2 GB allocation from a bank descriptor that has not been filled yet - a race that
+instant, unpaced disc reads expose; `XBE_DISC_RATE=<MB/s>` changes the timing but does not remove it),
+or occasionally faults a host SEGV in early boot instead. A retry driver
+(`/tmp/opencode/outrun2-mode-test/cr2-retry.sh`) repeats attempts with freeze detection until one gets
+through: roughly 1-3 in 10.
 
 Before the fix (`/tmp/opencode/outrun2-mode-test/c4-trap.log`, 44.940 s):
 

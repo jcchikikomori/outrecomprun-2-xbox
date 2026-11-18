@@ -30,7 +30,10 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Not cancelled on purpose: the self-hosted runner cleans its temporary directory when a job
+  # ends, and a cancelled job that is still cleaning up removes the temp directory of the next
+  # job, which then fails its checkout with "could not lock config file .../.gitconfig".
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -165,6 +168,11 @@ jobs:
       JOBS: ${{ vars.CI_JOBS || '3' }}
       XBE_PATH: ${{ vars.OUTRUN2_XBE_PATH }}
     steps:
+      - name: Prepare the runner temporary directory
+        # The runner creates $RUNNER_TEMP per job and removes it when a job ends. Recreating it
+        # here keeps the checkout working if a concurrent cleanup removed it a moment earlier.
+        run: mkdir -p "$RUNNER_TEMP"
+
       - name: Check out the repository
         uses: actions/checkout@v5
         with:

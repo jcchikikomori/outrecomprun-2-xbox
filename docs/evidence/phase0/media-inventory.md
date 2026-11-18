@@ -331,6 +331,12 @@ showed the in-game tunnel scene.
 One separate run recorded a divide-error trap at `0x195D6B`. It did not reproduce in the later
 186-second run or the manual playtest, so it remains a watch item rather than a confirmed blocker.
 
+That trap was later reproduced deliberately and fixed. It is the OUTRUN MODE banner's indexed
+user-pointer draw dividing the push-buffer dword budget by the `CDevice`'s cached vertex layout,
+which the SDK's HLE bodies for `SetVertexShader` and `SetStreamSource` leave at zero. The root
+cause, the guest addresses, the fix and its validation are in
+[`outrun-mode-trap.md`](outrun-mode-trap.md).
+
 A local manual bundle is available under `.local/playtest/OutRun2-Offline/`. It contains the fixed
 executable, the user's ISO, a prepared Proton prefix, and an offline launcher. It is git-ignored and
 must not be published because it contains the user's game image.
@@ -349,6 +355,7 @@ must not be published because it contains the user's game image.
 - [x] Classify the missing `XcPKGetKeyLen` kernel import as statically unused.
 - [x] Prove the Linux-to-Windows cross-build and launch it under Wine, Bottles, or Proton.
 - [x] Supply the missing XDK 5849 `D3D_FvfShader` data object and verify the profile path.
+- [x] Root-cause the divide-error trap at `0x195D6B`, fix it, and reach the OUTRUN MODE race start.
 - [ ] Measure the original update and presentation cadence from the running build.
 - [ ] Exercise at least one guest `fs:[0]` SEH path in the runtime.
 

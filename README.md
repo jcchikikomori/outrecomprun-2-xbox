@@ -24,7 +24,9 @@ a clean checkout and defines the title, paths, and configuration that the later 
 | Runtime log prefix | `outrun2` |
 
 The Phase 0 evidence (disc tree, hashes, XBE identity, symbol match, push-buffer and `fs:` audits) is in
-[`docs/evidence/phase0/media-inventory.md`](docs/evidence/phase0/media-inventory.md).
+[`docs/evidence/phase0/media-inventory.md`](docs/evidence/phase0/media-inventory.md). The OUTRUN MODE
+divide-error trap and its fix are in
+[`docs/evidence/phase0/outrun-mode-trap.md`](docs/evidence/phase0/outrun-mode-trap.md).
 
 ## Validation and deployment lanes
 
