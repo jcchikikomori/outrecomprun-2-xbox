@@ -1,0 +1,36 @@
+# Build environment for the Linux -> Windows x64 cross-build of Game.exe.
+#
+#   scripts/cross-build.sh builds this image as outrun2-xbe-cross:24.04 when it is missing.
+#
+# Clang 20 and LLD 20 come from apt.llvm.org because the MSVC STL and header set need
+# Clang >= 19; Ubuntu 24.04's default LLVM is 18. clang-cl ships in clang-tools-20, not
+# clang-20. The Windows SDK and UCRT are not in the image: xwin downloads them from
+# Microsoft on first build into the ignored .local/xwin/ tree (accepting Microsoft's
+# license, see cross/windows-cross.cmake).
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        xz-utils \
+        git \
+        cmake \
+        ninja-build \
+        file \
+    && curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key -o /etc/apt/trusted.gpg.d/llvm.asc \
+    && echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" > /etc/apt/sources.list.d/llvm.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        clang-20 \
+        clang-tools-20 \
+        lld-20 \
+        llvm-20 \
+        libclang-rt-20-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Keep FetchContent and the build tree out of any host home directory the container may see.
+ENV HOME=/tmp
+
+WORKDIR /work

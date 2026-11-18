@@ -1,0 +1,264 @@
+# OutRun 2 (Original Xbox) — static recompilation
+
+An unofficial PC port of the 2004 Original Xbox release of **OutRun 2**, built from the user's own
+`default.xbe` with the [XboxXBERecomp](https://github.com/hk21x/XboxXBERecomp) SDK (the `hk21x` fork,
+pinned as the `sdk/` submodule at `b908ae7f05908ff335f94037c673e4b437c7c1d6`).
+
+This repository is the **Phase 1 scaffold**. It builds the SDK's Linux tools and headless harness from
+a clean checkout and defines the title, paths, and configuration that the later phases extend.
+
+> [!IMPORTANT]
+> No game assets are included or redistributed. You must own a lawful copy of the disc. The ISO,
+> extracted files, `default.xbe`, CVMs, generated C++, and keys stay local and are git-ignored.
+
+## Target
+
+| Item | Value |
+| --- | --- |
+| Game | OutRun 2 (2004), Original Xbox |
+| Release studied | European `SE-054` (English, French, German, Spanish, Italian) |
+| Title ID | `53450036` |
+| XDK build matched | `5849` |
+| Code partitions | 64 (read from the generated `config/game.toml`) |
+| Recompiler target | `Game` (`add_xbe_image`), XBE `default.xbe` |
+| Runtime log prefix | `outrun2` |
+
+The Phase 0 evidence (disc tree, hashes, XBE identity, symbol match, push-buffer and `fs:` audits) is in
+[`docs/evidence/phase0/media-inventory.md`](docs/evidence/phase0/media-inventory.md).
+
+## Validation and deployment lanes
+
+| Lane | State | Notes |
+| --- | --- | --- |
+| **Linux x64 headless harness** | **Active validation lane** | Runs the recompiled guest, host runtime, scripted input, CPU reference renderer, frame logs, and network tests without a window, GPU, or audio device. All correctness gates start here. |
+| **Windows-compatible x64 executable** | Playable lane (Windows, or cross-built on Linux) | `build.bat` on Windows, or `scripts/cross-build.sh` on Linux, produces `Game.exe`; on Steam Deck it runs under **Wine, Bottles, or Proton**. |
+| Native Windows x64 release | Deferred | Needs a Windows build host; no such host is available yet. |
+| Native Linux Vulkan runtime | Deferred | A separate renderer backend, not on the critical path. |
+
+The Linux headless harness is the lane this scaffold and its helpers support. Native Linux Vulkan and
+native Windows release builds are explicitly out of scope for Phase 1.
+
+## Prerequisites
+
+- Linux x64 host (SteamOS/Steam Deck and ordinary distributions).
+- [Docker](https://docs.docker.com/engine/install/) or [Podman](https://podman.io/) — the container
+  supplies Clang, CMake, Ninja, Git, and ImageMagick, so **no development headers are installed on the
+  host**. The helper also recognises a Podman-backed `docker` command and maps the working directory to
+  your UID, so build artifacts stay yours. On SteamOS, start the Docker service and make sure your user
+  can run `docker` without `sudo` (Docker group or rootless setup).
+- Git, including submodule support.
+- Your own copy of the game, extracted into `assets/` (see below).
+
+## Add your game files
+
+`assets/` is git-ignored. Put either the disc image there, or the extracted disc contents with
+`default.xbe` at their root:
+
+```text
+assets/
+├── default.xbe
+├── data/
+├── media/
+└── ...
+```
+
+The ISO can also stay on removable storage. For a headless run, set `GAME` to the disc image or to any
+extracted folder outside the repository; the container helper bind-mounts that path **read-only at the
+same absolute path**, so nothing has to be copied into `assets/`. Building still needs
+`assets/default.xbe` and its folders: `xbe_symbols` and `recompile.sh` read them.
+Never commit, upload, or paste these files, and never commit `generated/`.
+
+## Quick start: Linux headless harness (container)
+
+```bash
+git clone --recurse-submodules git@github.com:jcchikikomori/outrun-2-xbox-recomp.git
+cd outrun-2-xbox-recomp
+
+# put your own disc contents in assets/ first
+scripts/container.sh bootstrap
+```
+
+`bootstrap` does the whole first build inside the container:
+
+1. `scripts/linux-tools.sh` — configure with Clang and build `xbe_symbols` and `xbe_recomp`
+   (`build/linux/`).
+2. `xbe_symbols assets/default.xbe sdk/xdk --out config/game.toml` — rewrite the generated config
+   (skipped when it already contains `[symbols]`; `FORCE=1` rescans).
+3. `scripts/recompile.sh` — regenerate `generated/game` (64 partitions; the slow step).
+4. `scripts/harness.sh` — build and run the headless harness with `scripts/pad/boot.txt` for 60
+   seconds.
+
+Then iterate:
+
+```bash
+scripts/container.sh harness 60 scripts/pad/boot.txt       # build + run headless
+scripts/container.sh harness 120 scripts/pad/race.txt REF=300
+scripts/container.sh shell                                  # inspect the image
+
+# run from removable media without copying it into the repository
+GAME="/run/media/deck/SN512/Roms/xbox/OutRun 2 (Europe) (En,Fr,De,Es,It).iso" \
+  scripts/container.sh harness 60 scripts/pad/boot.txt
+GAME="/run/media/deck/SN512/Roms/xbox/outrun2-extracted" \
+  scripts/container.sh harness 60
+
+# print the exact container command, including the read-only mount, without running it
+GAME="/run/media/deck/SN512/Roms/xbox/OutRun 2 (Europe) (En,Fr,De,Es,It).iso" \
+  DRY_RUN=1 scripts/container.sh harness 60
+```
+
+`GAME` is quoted as a normal shell variable, so spaces in a disc image name are safe. Repository-local
+values (`GAME=assets` or a relative folder) behave as before; only paths outside the repository get an
+extra `-v <path>:<path>:ro` mount, at the same absolute path so the value means the same in the
+container. `DRY_RUN=1` prints the full `docker`/`podman` invocation and does not build the image or run
+anything.
+
+The image is cached as `outrun2-xbe-tools:24.04`. `REBUILD=1` rebuilds it after a Dockerfile change;
+`CONTAINER_ENGINE=podman` selects Podman. Harness variables such as `REF`, `CAP`, `KEEP_HDD`, `FPS`,
+`GAME`, and `OUTPUT` pass through to the SDK scripts (see `sdk/harness/README.md`).
+
+Logs land in `.local/run/1/logs` and captures in `captures/`; both are ignored.
+
+> `build/linux` records an absolute source path. The container mounts the repository at `/work`, so a
+> previous **host** build in the same `build/linux` is rejected with a message. Remove `build/linux`
+> when switching between the host and container lanes.
+
+## Quick start: Linux tools on the host
+
+If the host already has Clang, CMake, Ninja, Git, and ImageMagick, use the same upstream scripts
+without the container:
+
+```bash
+scripts/linux-tools.sh
+build/linux/xbe_symbols assets/default.xbe sdk/xdk --out config/game.toml
+scripts/recompile.sh
+scripts/harness.sh 60 scripts/pad/boot.txt
+```
+
+The SDK's `scripts/linux-tools.sh` configures SDL3 for a headless console build and builds only the
+recompiler tools; the executable they feed is Windows-only and is cross-built on Linux with
+`scripts/cross-build.sh` (below).
+
+## Windows-compatible build (and Steam Deck play)
+
+On a Windows host with Visual Studio 2022 (`Desktop development with C++`, `C++ Clang tools for
+Windows`, `C++ CMake tools for Windows`) and the game files in `assets\`:
+
+```bat
+build.bat
+```
+
+The first build runs `xbe_symbols`, then recompiles `default.xbe` (expect 30–90 minutes) into
+`out\build\release\Game.exe`. Copy that executable together with its `assets` (or the player's own
+disc image) to the Steam Deck and add it to Bottles or Proton, or run it under Wine.
+
+### Cross-build from Linux (container)
+
+The same executable can be built on Linux, without a Windows host: Clang 20 targeting
+`x86_64-pc-windows-msvc`, LLD, and an [xwin](https://github.com/Jake-Shadle/xwin) Windows SDK/UCRT
+sysroot, in a dedicated container image. It uses the pinned `sdk/` submodule, `config/`, `src/`,
+`assets/default.xbe`, and the `generated/game` that the native Linux `xbe_recomp` already produced.
+The developer model is used: all 64 partitions link into `Game.exe` (`XBE_GAME_DLL` off).
+
+```bash
+scripts/container.sh bootstrap      # once: native tools, symbols, generated/game
+scripts/cross-build.sh              # configure + build -> out/build/cross-windows/Game.exe
+file out/build/cross-windows/Game.exe
+```
+
+`RECOMPILE=1 scripts/cross-build.sh` regenerates `generated/game` from the combined
+`config/outrun2.toml` (which includes `config/game.toml`) before building — use it after changing
+the config.
+
+The first run builds the `outrun2-xbe-cross:24.04` image and downloads Microsoft's Windows SDK/UCRT
+through xwin (license accepted via `--accept-license`); both are cached, and `.local/xwin/` is
+git-ignored. `DRY_RUN=1` prints the container command, `REBUILD=1` rebuilds the image, and `JOBS=n`
+sets ninja parallelism (default 3). Logs are `logs/cross-configure.log` and `logs/cross-build.log`.
+Under Wine/Proton the PE needs the VC++ 2015-2022 x64 runtime and the game data beside it, exactly
+like the `build.bat` output. Details and the CMake/toolchain rationale: [`cross/README.md`](cross/README.md).
+
+Native Windows x64 remains the eventual release target.
+
+## Configuration
+
+| Path | Role |
+| --- | --- |
+| `config/game.toml` | Generated XDK symbol analysis. `xbe_symbols` writes it and `scripts/container.sh symbols` regenerates it; **do not hand-edit**. It is git-ignored, and its 64-partition value is read by `CMakeLists.txt`. |
+| `config/outrun2.toml` | Hand-authored overrides. `includes = ["game.toml"]`, so `[[hook]]`, `[[function]]`, `[[switch]]`, `data_ranges`, and `[abi]` entries survive a rescan. This is the config `add_xbe_image` passes to the recompiler. |
+| `src/common/game_info.cpp` | `app::kGame`: title, window class, log prefix, settings file, and lifecycle hooks. |
+| `src/game/hooks.cpp` | Title-specific `X86_FUNC` overrides; empty except for the example. |
+| `scripts/game.env` | Values the shared SDK scripts use: XBE name, log prefix, target, Ghidra project, smoke pad. |
+
+Generated code lives in `generated/game/` and is never edited or committed. Game-specific fixes belong
+in `src/game/`, `config/outrun2.toml`, or narrowly scoped runtime changes, not in generated C++.
+
+## Scripts
+
+`scripts/*.sh` are thin wrappers over the shared scripts in `sdk/scripts`; this game's values come from
+`scripts/game.env`.
+
+| Script | Purpose |
+| --- | --- |
+| `scripts/linux-tools.sh` | Configure for Linux; build `xbe_symbols` and `xbe_recomp`. |
+| `scripts/recompile.sh` | Regenerate `generated/game` from `assets/default.xbe` and the config. |
+| `scripts/harness.sh [secs] [pad] [ENV=..]` | Build and run the headless harness. |
+| `scripts/smoke.sh` | Title → race smoke test; must print `SMOKE OK`. Pad sequence is still provisional. |
+| `scripts/soak.sh [minutes]` | Back-to-back races; needs `SOAK_PAD` in `scripts/game.env`. |
+| `scripts/ghidra.sh <Script> ...` | Run an SDK Ghidra script against the local analysis project. |
+| `scripts/container.sh <command>` | Docker/Podman wrapper for the commands above. |
+| `scripts/cross-build.sh` | Cross-build the Windows `Game.exe` in a container; needs `generated/game`. |
+
+Pad scripts are vertical-blank scripts (`vblank buttons [held]`), 60 blanks per second regardless of
+the title's frame rate. `scripts/pad/none.txt` boots to attract mode; `boot.txt` and `race.txt` are
+**provisional** Phase 1 sequences and must be calibrated against the real boot path.
+
+## Repository layout
+
+```text
+.
+├── CMakeLists.txt              # add_xbe_image(Game default.xbe outrun2.toml ...)
+├── CMakePresets.json           # Windows presets used by build.bat
+├── build.bat                   # Windows build (SDK tools, symbols, recompile)
+├── sdk/                        # pinned XboxXBERecomp submodule
+├── assets/                     # ignored: your ISO, default.xbe, extracted files
+├── generated/                  # ignored: generated lifted C++
+├── .local/                     # ignored: analysis, run folders, logs
+├── captures/                   # ignored: harness frame captures
+├── config/
+│   ├── game.toml               # generated, git-ignored XDK symbol analysis
+│   └── outrun2.toml            # hand-authored overrides (includes game.toml)
+├── scripts/
+│   ├── container.sh            # Docker/Podman lane
+│   ├── container/Dockerfile    # Clang/CMake/Ninja/ImageMagick image
+│   ├── container/Dockerfile.cross  # LLVM 20 image for the Windows cross-build
+│   ├── cross-build.sh          # Windows Game.exe cross-build (Linux -> Windows)
+│   ├── cross-build-inner.sh    # its container-side half (xwin, configure, build)
+│   ├── game.env                # this title's values for the shared scripts
+│   └── pad/                    # vertical-blank input scripts
+├── cross/
+│   ├── CMakeLists.txt          # cross project: runtime + src + generated/game -> Game.exe
+│   └── windows-cross.cmake     # Clang/LLD/xwin toolchain file
+└── src/
+    ├── common/game_info.cpp    # app::kGame
+    └── game/hooks.cpp          # title hooks
+```
+
+## Copyright and tracked-file audit
+
+`assets/`, `generated/`, `.local/`, `captures/`, logs, saves, and crash dumps are git-ignored. Before
+any release or review, confirm that no game media or generated code is tracked:
+
+```bash
+git ls-files | grep -E '^(assets|generated|\.local|captures)/'   # must print nothing
+git ls-files -s sdk                                              # the pinned submodule commit
+```
+
+The SDK is MIT-licensed. The game remains the property of Sega and its licensors; this project ships
+no game code or assets.
+
+## References
+
+- [XboxXBERecomp SDK](https://github.com/hk21x/XboxXBERecomp) and its `harness/README.md`
+- [Canonical upstream SDK](https://github.com/TGP482/XboxXBERecomp)
+- [xbe_symbols / XBE tooling in the SDK](sdk/tools/symbols)
+- Phase 0 evidence: [`docs/evidence/phase0/media-inventory.md`](docs/evidence/phase0/media-inventory.md)
+- Implementation plan: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)

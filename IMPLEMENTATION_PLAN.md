@@ -129,6 +129,22 @@ XBE. The selection is therefore no longer provisional.
 The implementation follows the existing `hk21x` harness, launcher, diagnostic, and recompiler
 patterns rather than inventing a second runtime.
 
+### Windows cross-build route
+
+The preferred cross-build proof uses the upstream Clang-based toolchain rather than MSVC:
+
+- Clang 19 or newer targeting `x86_64-pc-windows-msvc`.
+- An `xwin`-splat Windows SDK and UCRT sysroot.
+- LLD for the final Windows link.
+- The developer model (`XBE_GAME_DLL` disabled), so the executable links the generated game code
+  directly and does not stage Windows `clang.exe` or `lld-link.exe` at runtime.
+- A small game-side CMake toolchain file, rather than a broad fork of the SDK runtime.
+
+The first playable test should use Proton's vkd3d path for Direct3D 12. If Wine's
+`d3dcompiler_47` cannot compile a runtime shader, install the native Microsoft DLL or switch to the
+SDK's existing Direct3D 11 backend under DXVK. The release model's first-start compiler is not
+part of the Linux cross-build.
+
 ## 5. Repository Shape
 
 ```text
@@ -178,6 +194,11 @@ building a full game project.
 - A flat PE was exported for Ghidra and its SHA-256 was recorded.
 - `xbe_recomp` accepted the complete XBE and generated all 64 partitions: 12,691 functions, 721,662
   instructions, 359 jump tables, and 96 MiB of private C++ output.
+- The generated C++ compiled into the Linux headless harness. A sixty-second run booted the real
+  disc, initialized the Xbox kernel, created a 640×480 device, and reached frame 2,340 with 14,168
+  draws. `XBE_PERF` confirmed a 60-frame-per-second startup/menu interval from frames 240–720.
+  Reference captures rendered the Sega AM2 and Sumo Digital startup screens without an instruction
+  trap.
 - Ghidra found 547 `FS:`-prefixed instructions in 200 containing function labels. Both SDK
   candidates implement the required `fs_base` translation and SEH support.
 - Ghidra found seven direct `BeginPush`/`EndPush` call sites containing nine push sequences. Those
@@ -191,13 +212,18 @@ building a full game project.
   packet path was found, so native force feedback is not a Version 1.0 blocker.
 - Both SDK candidates were inspected. The `hk21x` fork additionally provides ordered push-buffer
   recording, fixups, and the required headless diagnostics.
+- The Linux-to-Windows developer build succeeded with Clang 20, LLD, and an `xwin` Windows SDK
+  sysroot. GE-Proton 11 and vkd3d-proton rendered the Sega startup screen, profile creation, and a
+  3D tunnel scene on the Steam Deck.
+- The first playable run exposed a null default FVF shader object. Ghidra traced the guest
+  initialization to `0x1A67C8`; the title-specific `D3D_FvfShader` data override removes the former
+  profile-scene access violation. Independent fixed-build runs lasted 203 and 186 seconds without a
+  crash.
 
 #### Remaining tasks
 
-1. Compile the generated C++ and link the Linux headless harness.
-2. Select and prove a Linux-to-Windows cross-build route that can run through Wine, Bottles, or
-   Proton.
-3. Carry the `fs:`/SEH and push-command audits into the Phase 1 runtime boot test.
+1. Carry the `fs:`/SEH and push-command audits into the Phase 1 runtime boot test.
+2. Measure race cadence and investigate the non-reproduced divide-error trap if it recurs.
 
 The working symbol and flat-PE commands are:
 
@@ -406,13 +432,15 @@ only after checking that its addresses and assumptions match the *OutRun 2* XBE.
 | --- | --- | --- | --- |
 | Push command semantics are not fully honored at runtime. | Medium | Medium | Static analysis found only methods `0x17FC` and `0x1818`, both recognized. Verify state ordering and rendered output in Phase 2. |
 | Incomplete `fs:`/SEH behavior despite static translation support. | Medium | High | Both SDKs implement `fs_base`; require a runtime exception-path test in Phase 1. |
-| An unmatched XDK function is actually required. | Low | Medium | 43 unmatched IDs are absent from the XBE and 49 are optional variants. Use runtime trap logs as the final safety net. |
+| Startup or menu transition stalls in the headless runtime. | Medium | High | The first 240 frames render, but later reference capture and scripted navigation need diagnosis. Keep frame logs and draw captures for each transition. |
+| Missing kernel import is reached. | Low | Low | `XcPKGetKeyLen` is the only unresolved import; Ghidra found no reference to its import slot. |
+| An unmatched XDK function or data object is actually required. | Low | Medium | 43 unmatched IDs are absent from the XBE and 49 are optional variants. The missing FVF data object was found through a runtime crash and fixed explicitly. |
+| Linux-to-Windows cross-build or Wine compatibility blocks playtesting. | Low | Medium | The Clang 20, LLD, and `xwin` build is validated; GE-Proton 11 and vkd3d-proton render the game on this Deck. |
 | Rendering-state or resource-lifetime mismatch. | High | Medium | Fixed-resolution captures, deferred release, and repeated transition tests. |
 | Frame-rate change alters physics. | Medium | High | Measure the original cadence in Phase 1, preserve it in Version 1.0, and defer higher rates. |
 | Threading or restart deadlock. | Medium | High | Reproduce early and test at least 100 restart cycles. |
 | Upstream or fork drift. | High | Medium | Pin exact commits and keep game-specific patches outside generated code. |
 | Video codec gap. | Medium | Medium | The 15 `.SFD` files are MPEG-1 Program Streams and `WMADEC` is linked into the guest. Verify playback in the runtime. |
-| Linux-to-Windows cross-build or Wine compatibility blocks playtesting. | Medium | High | Prove the toolchain in Phase 0, keep the headless lane independent, and use an `xwin` or LLVM-MinGW precedent. |
 | Sensitive assets enter source control. | Low | High | Ignore rules, local-only storage, and tracked-file audits. |
 | Wheel behavior expands scope. | Low | Low | No native wheel path was found. Ship standard controller support first and treat host FFB as optional. |
 
@@ -421,9 +449,10 @@ only after checking that its addresses and assumptions match the *OutRun 2* XBE.
 ### Linux and Steam Deck development host
 
 The current workstation is the active development and playtest host. It has Git, CMake, Clang, LLD,
-Python, Java, Cargo, Wine, `xdvdfs`, and Ghidra 12.1.4. The host lacks native development headers
-and Ninja, so compiler-dependent Linux tools are built in ephemeral Ubuntu containers with
-Docker/Podman instead of changing the host installation.
+Python, Java, Cargo, `xdvdfs`, Ghidra 12.1.4, Bottles integration, and several Proton installations.
+RADV exposes Vulkan 1.4.350 on the current AMD GPU. The host lacks native development headers and
+Ninja, so compiler-dependent Linux tools are built in ephemeral Ubuntu containers with Docker/Podman
+instead of changing the host installation.
 
 The host uses three build or validation paths:
 
@@ -479,14 +508,14 @@ removable volume and is not copied into the repository.
 ## 12. First Ten Working Days
 
 1. [x] Obtain the ISO path and record its identity.
-2. [ ] Pin the selected SDK commit and prove the Linux headless and cross-build toolchains.
+2. [x] Pin the selected SDK commit and prove the Linux headless and cross-build toolchains.
 3. [x] Inventory and hash the ISO.
 4. [x] Extract `default.xbe` and record its identity.
 5. [x] Run `xbe_symbols` and confirm XDK `5849` with 64 partitions.
 6. [x] Export the flat PE and open it in Ghidra.
 7. [x] Complete the input-device and unmatched-symbol audits.
-8. [ ] Create the reproducible project skeleton, Linux headless build, and Windows cross-build.
-9. [ ] Resolve the first boot-time failures and establish crash/log evidence.
+8. [x] Create the reproducible project skeleton, Linux headless build, and Windows cross-build.
+9. [x] Resolve the first boot-time failures and establish crash/log evidence.
 10. [ ] Reach the title screen and turn the menu traversal into a repeatable test.
 
 ## 13. Definition of Done for Version 1.0
@@ -510,6 +539,9 @@ Version 1.0 is complete when:
 - [XboxXBERecomp SDK documentation](https://github.com/TGP482/XboxXBERecomp)
 - [hk21x XboxXBERecomp fork](https://github.com/hk21x/XboxXBERecomp)
 - [PGR2 recomp reference project](https://github.com/hk21x/pgr2-recomp)
+- [Windows cross-build reference project](https://github.com/tijayfly/gt64_recomp)
+- [CommonLibSSE cross-compilation reference](https://github.com/alandtse/CommonLibSSE-NG)
+- [Native Linux XboxXBERecomp example](https://github.com/abilliontokens/fuzionfrenzy-recomp)
 - [xdvdfs inspection and extraction tool](https://github.com/antangelo/xdvdfs)
 - [XboxDev Ghidra XBE loader](https://github.com/XboxDev/ghidra-xbe)
 - [Disc dumping guide](https://wiki.redump.info/Microsoft_Xbox_and_Xbox_360_Dumping_Guide)

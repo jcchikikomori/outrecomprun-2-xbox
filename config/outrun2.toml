@@ -1,0 +1,36 @@
+# OutRun 2 hand-authored recompiler overrides.
+# The generated config (config/game.toml) is rewritten by xbe_symbols, so hand entries live here instead.
+# This file is what CMakeLists.txt passes to add_xbe_image(); it includes the generated one first.
+includes = ["game.toml"]
+
+# The guest's device init at 0x19A6D0 stores the FVF shader object at 0x1A67C8 into the
+# device's CDevice_VertexShader field (offset 0x794); 0x196D00 dereferences it. SDK 5849
+# has no D3D_FvfShader data signature, so the host HLE Direct3D_CreateDevice cannot fill
+# the field by itself: name the object here. The recompiler emits it into
+# generated/game/image_symbols.h as SYM_D3D_FvfShader / HAS_D3D_FvfShader, and
+# runtime/xdk/d3d8.cpp stores it into the device when the field is known.
+[data]
+D3D_FvfShader = 0x001A67C8
+
+# Add title-specific entries below, following the examples in config/game.toml:
+#
+# [xbe]
+# data_ranges = [[0x00150000, 0x00150040]]   # bytes in code sections that are never code, end exclusive
+# trace = [0x00012345]                        # log calls of these functions during analysis
+# continuations = [0x00012360]                # addresses after a setjmp call (longjmp landing sites)
+#
+# [[hook]]                    # call a host function before or after a guest instruction
+# at = 0x0012ABCD
+# call = "FixSomething"       # defined in src/game/hooks.cpp
+# after = false
+#
+# [[function]]                # an entry the analysis missed or ran past
+# at = 0x00123450
+# end = 0x00123520
+#
+# [[switch]]                  # an indirect jmp whose jump table was detected wrongly
+# at = 0x00123480
+# targets = [0x00123490, 0x001234A8]
+#
+# [abi]
+# D3D_InternalRelease = ["esi"]

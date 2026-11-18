@@ -1,0 +1,6 @@
+# vblank buttons [vblanks held]   (the vertical blanks presented frames asked for: 60 a second, whatever the game's
+# frame rate; one line per press, buttons joined with +: UP DOWN LEFT RIGHT START BACK A B X Y LT RT LS LSD LSL LSR)
+#
+# PROVISIONAL OutRun 2 boot script: wait for the title screen, then press START.
+# Replace it with the sequence measured from .local/run/1/logs and captures/ during Phase 1.
+180 START

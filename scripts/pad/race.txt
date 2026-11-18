@@ -1,0 +1,9 @@
+# vblank buttons [vblanks held]   (the vertical blanks presented frames asked for: 60 a second, whatever the game's
+# frame rate; one line per press, buttons joined with +: UP DOWN LEFT RIGHT START BACK A B X Y LT RT LS LSD LSL LSR)
+#
+# PROVISIONAL OutRun 2 smoke script: title -> menus -> a race, then hold the accelerator.
+# Phase 1 must replace these presses with the sequence actually measured on the boot path.
+180 START
+300 A
+420 A
+600 RT 3600
