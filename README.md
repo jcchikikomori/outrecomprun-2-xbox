@@ -181,6 +181,47 @@ like the `build.bat` output. Details and the CMake/toolchain rationale: [`cross/
 
 Native Windows x64 remains the eventual release target.
 
+## CI (GitHub Actions)
+
+`.github/workflows/ci.yml` runs on every push to `main`, `develop`, `feature/**`, `bugfix/**` and
+`hotfix/**`, on pull requests targeting `main` or `develop`, and on `v*` tags (for a draft
+release).
+
+| Job | Runs on | What it does |
+| --- | --- | --- |
+| `validate` | GitHub-hosted | Shell syntax, TOML/JSON parse, tracked-file and `.gitignore` audit, whitespace/conflict scan, SDK pin check, container dry runs, Markdown sanity. No game media needed. |
+| `tools` | GitHub-hosted | Builds `xbe_symbols` and `xbe_recomp` — code-free host tools — and uploads them. |
+| `build` | self-hosted (this Deck) | Stages `assets/default.xbe` from `OUTRUN2_XBE_PATH`, verifies it against `config/default.xbe.sha1`, regenerates the 64 partitions and cross-builds `Game.exe`. |
+| `release` | GitHub-hosted | On a `v*` tag: creates a **draft** release with the build metadata (and the executable when it was published). |
+
+The game build cannot run on GitHub-hosted runners: the pinned SDK needs `assets/default.xbe` at
+build time, and that file is user-owned media. It stays on the runner and is never committed, never
+uploaded and never a GitHub secret (3.1 MB is far above the 48 KB secret limit).
+
+One-time setup on the machine that owns the disc:
+
+```bash
+scripts/ci/setup-runner.sh      # register this machine and install it as a user service
+```
+
+`Game.exe` contains recompiled game code, so it is uploaded only when the publish gate is open:
+repository variable `PUBLISH_GAME_ARTIFACT=true`, or the `publish` input of a manual run. With the
+gate closed, the build still runs and uploads hashes and logs. Artifacts of a public repository are
+public while they exist, so opening that gate is a distribution decision, not a convenience.
+
+The same checks run locally with:
+
+```bash
+scripts/ci/check-config.sh
+scripts/ci/audit-tracked.sh
+scripts/ci/check-submodule.sh
+scripts/ci/check-markdown.sh
+scripts/ci/dry-run-preflight.sh
+```
+
+Runner setup, repository variables, artifact names, the peer-project comparison and the copyright
+boundary: [`docs/ci.md`](docs/ci.md).
+
 ## Configuration
 
 | Path | Role |
@@ -218,6 +259,7 @@ the title's frame rate. `scripts/pad/none.txt` boots to attract mode; `boot.txt`
 
 ```text
 .
+├── .github/workflows/ci.yml      # validation, code-free tools build, self-hosted game build
 ├── CMakeLists.txt              # add_xbe_image(Game default.xbe outrun2.toml ...)
 ├── CMakePresets.json           # Windows presets used by build.bat
 ├── build.bat                   # Windows build (SDK tools, symbols, recompile)
@@ -228,13 +270,15 @@ the title's frame rate. `scripts/pad/none.txt` boots to attract mode; `boot.txt`
 ├── captures/                   # ignored: harness frame captures
 ├── config/
 │   ├── game.toml               # generated, git-ignored XDK symbol analysis
-│   └── outrun2.toml            # hand-authored overrides (includes game.toml)
+│   ├── outrun2.toml            # hand-authored overrides (includes game.toml)
+│   └── default.xbe.sha1        # pinned SHA-1 of the user's default.xbe (CI check)
 ├── scripts/
 │   ├── container.sh            # Docker/Podman lane
 │   ├── container/Dockerfile    # Clang/CMake/Ninja/ImageMagick image
 │   ├── container/Dockerfile.cross  # LLVM 20 image for the Windows cross-build
 │   ├── cross-build.sh          # Windows Game.exe cross-build (Linux -> Windows)
 │   ├── cross-build-inner.sh    # its container-side half (xwin, configure, build)
+│   ├── ci/                     # CI checks and the self-hosted runner setup
 │   ├── game.env                # this title's values for the shared scripts
 │   └── pad/                    # vertical-blank input scripts
 ├── cross/

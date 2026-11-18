@@ -1,0 +1,462 @@
+name: CI
+
+# Validate every change on GitHub-hosted runners; build the game executable only on the
+# maintainer's self-hosted runner, which is the only machine that has the user's default.xbe.
+# See docs/ci.md for the runner, the repository variables and the publishing policy.
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload the compiled Game.exe as a public artifact'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Start the validation log
+        run: |
+          mkdir -p ci-logs
+          : > ci-logs/validate.log
+          {
+            echo "run: $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
+            echo "event: $GITHUB_EVENT_NAME"
+            echo "ref: $GITHUB_REF"
+            echo "sha: $GITHUB_SHA"
+            echo "runner: $RUNNER_NAME ($RUNNER_OS)"
+            echo "submodules:"
+            git submodule status
+          } | tee -a ci-logs/validate.log
+
+      - name: Shell syntax (bash -n)
+        run: |
+          shopt -s nullglob
+          files=(scripts/*.sh scripts/ci/*.sh)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "no shell scripts found" >&2
+            exit 1
+          fi
+          for f in "${files[@]}"; do
+            printf 'bash -n %s\n' "$f"
+            bash -n "$f"
+          done 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Parse TOML and JSON configuration
+        run: scripts/ci/check-config.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Audit tracked files for media, generated code and build products
+        run: scripts/ci/audit-tracked.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Whitespace and conflict markers
+        env:
+          BASE_SHA: ${{ github.event.before }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: scripts/ci/check-diff.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Verify the pinned SDK submodule
+        run: scripts/ci/check-submodule.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Dry-run the container entry points
+        run: scripts/ci/dry-run-preflight.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Markdown headings and code fences
+        run: scripts/ci/check-markdown.sh 2>&1 | tee -a ci-logs/validate.log
+
+      - name: Upload validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-validate-logs-${{ github.run_number }}
+          path: ci-logs/validate.log
+          retention-days: 7
+          if-no-files-found: warn
+          overwrite: true
+
+  tools:
+    name: Build host tools (code-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      # xbe_symbols and xbe_recomp read an XBE but contain no game code. Set the
+      # CI_TOOLS_NONFATAL repository variable to 'true' only if the container build proves
+      # unreliable on GitHub-hosted runners; the failure is then reported in the summary.
+      - name: Build xbe_symbols and xbe_recomp
+        id: build-tools
+        continue-on-error: ${{ vars.CI_TOOLS_NONFATAL == 'true' }}
+        run: scripts/container.sh tools
+
+      - name: Upload host tools
+        if: steps.build-tools.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xbe-tools-linux-${{ github.sha }}
+          path: |
+            build/linux/xbe_symbols
+            build/linux/xbe_recomp
+          retention-days: 14
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Write job summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.build-tools.outcome }}
+        run: |
+          {
+            echo "## Host tools"
+            echo
+            if [ "$OUTCOME" = "success" ]; then
+              echo "- \`xbe_symbols\` and \`xbe_recomp\` built and uploaded as \`xbe-tools-linux-${{ github.sha }}\`."
+            else
+              echo "- **Host tools did not build** (outcome: \`${OUTCOME:-skipped}\`)."
+              echo "- This job is code-free; the game build job builds its own copy on the self-hosted runner."
+              echo "- See \`docs/ci.md\` for the container and network notes."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build Game.exe (self-hosted)
+    needs: [validate]
+    # A fork pull request must never execute code on the maintainer's runner. Pull requests
+    # from this repository still build; forks only get the validate job.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.RUNNER_LABELS || '["self-hosted","linux","outrun2-recomp"]') }}
+    timeout-minutes: 240
+    env:
+      # Inside .local/, which .gitignore already excludes, so nothing staged can be committed.
+      STAGING: ${{ github.workspace }}/.local/ci-staging
+      JOBS: ${{ vars.CI_JOBS || '3' }}
+      XBE_PATH: ${{ vars.OUTRUN2_XBE_PATH }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          # Keep .local/xwin, build/ and out/ between runs: the Windows SDK sysroot is a
+          # large download and the recompile step regenerates generated/game anyway.
+          clean: false
+
+      - name: Stage the game image (user-owned media)
+        run: |
+          set -euo pipefail
+          if [ -z "${XBE_PATH:-}" ]; then
+            echo "::error::Repository variable OUTRUN2_XBE_PATH is unset. Set it to the absolute path of your own default.xbe on this runner; see docs/ci.md."
+            exit 1
+          fi
+          if [ ! -f "$XBE_PATH" ]; then
+            echo "::error::OUTRUN2_XBE_PATH=$XBE_PATH is not a file on this runner. Copy your own default.xbe there; see docs/ci.md."
+            exit 1
+          fi
+          mkdir -p assets
+          cp -f -- "$XBE_PATH" assets/default.xbe
+          if ! ( cd assets && sha1sum -c ../config/default.xbe.sha1 ); then
+            echo "::error::assets/default.xbe does not match config/default.xbe.sha1. This build is validated against the European default.xbe; see docs/ci.md."
+            exit 1
+          fi
+
+      - name: Reset previous outputs
+        run: |
+          set -euo pipefail
+          if [ -z "${STAGING:-}" ] || [ "$STAGING" = / ]; then
+            echo "::error::STAGING is not set to a dedicated directory; refusing to clean up"
+            exit 1
+          fi
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING/game" "$STAGING/logs"
+          # A failed run must never leave an old executable behind for the collect step.
+          rm -f out/build/cross-windows/Game.exe
+          rm -f logs/*.log
+
+      - name: Build native host tools
+        run: scripts/container.sh tools
+
+      - name: Rescan XBE symbols
+        run: scripts/container.sh symbols
+
+      - name: Regenerate recompiled code
+        run: scripts/container.sh recompile
+
+      - name: Cross-build Windows Game.exe
+        run: RECOMPILE=1 scripts/cross-build.sh
+
+      - name: Collect the executable and metadata
+        id: collect
+        run: |
+          set -euo pipefail
+          exe=out/build/cross-windows/Game.exe
+          if [ ! -f "$exe" ]; then
+            echo "::error::$exe was not produced"
+            exit 1
+          fi
+          cp -f "$exe" "$STAGING/game/Game.exe"
+          sha256=$(sha256sum "$exe" | cut -d' ' -f1)
+          size=$(stat -c '%s' "$exe")
+          xbe_sha1=$(cut -d' ' -f1 config/default.xbe.sha1)
+          if command -v file >/dev/null 2>&1; then
+            file_type=$(file -b "$exe")
+          else
+            file_type='unknown (file(1) is not installed on this runner)'
+          fi
+          {
+            echo "commit: $GITHUB_SHA"
+            echo "ref: $GITHUB_REF"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "runner: $RUNNER_NAME"
+            echo "path: out/build/cross-windows/Game.exe"
+            echo "size_bytes: $size"
+            echo "sha256: $sha256"
+            echo "xbe_sha1: $xbe_sha1"
+            echo "built_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "file_type: $file_type"
+          } > "$STAGING/metadata.txt"
+          cat "$STAGING/metadata.txt"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "sha_short=${sha256:0:12}" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          cp -f logs/*.log "$STAGING/logs/" 2>/dev/null || true
+
+      - name: Collect logs (always)
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$STAGING/logs"
+          cp -f logs/*.log "$STAGING/logs/" 2>/dev/null || true
+          if [ ! -f "$STAGING/metadata.txt" ]; then
+            {
+              echo "commit: $GITHUB_SHA"
+              echo "ref: $GITHUB_REF"
+              echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo "runner: $RUNNER_NAME"
+              echo "result: the build did not reach artifact collection"
+            } > "$STAGING/metadata.txt"
+          fi
+
+      - name: Decide whether the executable may be published
+        id: gate
+        env:
+          PUBLISH_VAR: ${{ vars.PUBLISH_GAME_ARTIFACT }}
+          PUBLISH_INPUT: ${{ github.event.inputs.publish }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          publish=false
+          reason="default: metadata and logs only"
+          if [ "${PUBLISH_VAR:-}" = "true" ]; then
+            publish=true
+            reason="repository variable PUBLISH_GAME_ARTIFACT=true"
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "${PUBLISH_INPUT:-}" = "true" ]; then
+            publish=true
+            reason="workflow_dispatch input publish=true"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          {
+            echo
+            echo "### Publish gate"
+            echo
+            echo "- Executable published: **$publish** ($reason)"
+            if [ "$publish" != "true" ]; then
+              echo "- \`Game.exe\` is **not** uploaded: this is a public repository and the executable contains recompiled game code."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish Game.exe artifact
+        if: steps.gate.outputs.publish == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OutRun2-Windows-x64-${{ steps.collect.outputs.sha_short }}
+          path: ${{ env.STAGING }}/game/Game.exe
+          retention-days: 14
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Upload build metadata and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-build-logs-${{ github.run_number }}
+          path: |
+            ${{ env.STAGING }}/metadata.txt
+            ${{ env.STAGING }}/logs
+          retention-days: 7
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Write job summary
+        if: always()
+        env:
+          PUBLISHED: ${{ steps.gate.outputs.publish }}
+          PUBLISH_REASON: ${{ steps.gate.outputs.reason }}
+          SHA256: ${{ steps.collect.outputs.sha256 }}
+          SIZE: ${{ steps.collect.outputs.size }}
+          SHORT: ${{ steps.collect.outputs.sha_short }}
+        run: |
+          {
+            echo "## OutRun 2 Windows build"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Runner: \`$RUNNER_NAME\`"
+            if [ -n "${SHA256:-}" ]; then
+              mib=$(awk -v bytes="$SIZE" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+              echo "- SHA-256: \`$SHA256\`"
+              echo "- Size: $SIZE bytes (~$mib MiB)"
+            else
+              echo "- No executable was collected; see the \`ci-build-logs-${{ github.run_number }}\` artifact and the failing step."
+            fi
+            if [ "${PUBLISHED:-}" = "true" ]; then
+              echo "- Published: **yes** ($PUBLISH_REASON) as \`OutRun2-Windows-x64-${SHORT}\`."
+            elif [ -n "${PUBLISHED:-}" ]; then
+              echo "- Published: **no** ($PUBLISH_REASON)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Draft release
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download the published executable (if any)
+        id: game
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: OutRun2-Windows-x64-*
+          path: release/game
+          merge-multiple: true
+
+      - name: Download build metadata and logs
+        id: logs
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ci-build-logs-*
+          path: release/logs
+          merge-multiple: true
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          if [ -f release/game/Game.exe ]; then
+            published=yes
+          else
+            published=no
+          fi
+          if [ -f release/logs/metadata.txt ]; then
+            sha256=$(sed -n 's/^sha256: //p' release/logs/metadata.txt)
+            size=$(sed -n 's/^size_bytes: //p' release/logs/metadata.txt)
+            xbe_sha1=$(sed -n 's/^xbe_sha1: //p' release/logs/metadata.txt)
+            built=$(sed -n 's/^built_utc: //p' release/logs/metadata.txt)
+          else
+            sha256=''
+            size=''
+            xbe_sha1=''
+            built=''
+            echo "::warning::No build metadata artifact was found; the notes carry no hashes."
+          fi
+          {
+            echo "# OutRun 2 (Xbox) static recompilation $GITHUB_REF_NAME"
+            echo
+            echo "Draft created by CI from commit \`$GITHUB_SHA\`."
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo
+            echo "## Build"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Executable published | $published |"
+            echo "| SHA-256 | ${sha256:-unknown} |"
+            echo "| Size (bytes) | ${size:-unknown} |"
+            echo "| Build time (UTC) | ${built:-unknown} |"
+            echo "| Pinned XBE SHA-1 | ${xbe_sha1:-unknown} |"
+            echo
+            if [ "$published" != yes ]; then
+              echo "**No executable is attached to this draft.** The publish gate was closed for this run"
+              echo "(\`PUBLISH_GAME_ARTIFACT\` is not \`true\` and the dispatch input was not set). Complete the"
+              echo "release by hand after deciding whether the compiled game code may be distributed."
+              echo
+            fi
+            echo "## You still need your own copy of the game"
+            echo
+            echo "The executable is a static recompilation of the Xbox game code. It contains no game media:"
+            echo "no \`default.xbe\`, no disc image, no extracted CVM/SFD assets, and no generated recompiled"
+            echo "source. It is only useful together with a legally acquired copy of *OutRun 2* for the"
+            echo "original Xbox. Point it at your own \`assets/OutRun2.iso\` or an extracted \`assets/\` folder."
+            echo
+            echo "The Windows executable needs the Microsoft Visual C++ 2015-2022 x64 runtime under"
+            echo "Wine or Proton; the Windows SDK and UCRT are not bundled."
+            echo
+            echo "## Copyright"
+            echo
+            echo "*OutRun 2* is © SEGA. This project is not affiliated with or endorsed by SEGA. No game"
+            echo "media, extracted assets, or recompiled source is distributed here."
+          } > release/RELEASE_NOTES.md
+          cat release/RELEASE_NOTES.md
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          args=(--draft --verify-tag --title "OutRun 2 (Xbox) recompilation $tag" --notes-file release/RELEASE_NOTES.md)
+          files=()
+          if [ -f release/game/Game.exe ]; then
+            files+=(release/game/Game.exe)
+          fi
+          if [ -f release/logs/metadata.txt ]; then
+            files+=(release/logs/metadata.txt)
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists; updating assets and notes"
+            if [ "${#files[@]}" -gt 0 ]; then
+              gh release upload "$tag" "${files[@]}" --clobber
+            fi
+            gh release edit "$tag" --notes-file release/RELEASE_NOTES.md
+          else
+            if [ "${#files[@]}" -gt 0 ]; then
+              args+=("${files[@]}")
+            fi
+            gh release create "$tag" "${args[@]}"
+          fi
