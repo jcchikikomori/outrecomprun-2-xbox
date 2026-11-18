@@ -1,22 +1,17 @@
 # OutRun 2 Original Xbox Recompilation Implementation Plan
 
-**Plan date:** 2026-11-18
-**Primary development target:** Linux x64 headless validation plus a cross-built Windows executable
-**Primary playtest target:** Steam Deck through Wine, Bottles, or Proton
-**Release target:** Native Windows x64 when a Windows build host is available
-**Source media:** User-supplied Original Xbox DVD image for *OutRun 2*
-**Design baseline:** `/home/deck/Documents/OutRun2 Xbox Static/OutRun 2 Original Xbox Static Recomp Design Document.md`
+- **Plan date:** 2026-11-18
+- **Primary development target:** Linux x64 headless validation plus a cross-built Windows executable
+- **Primary playtest target:** Steam Deck through Wine, Bottles, or Proton
+- **Release target:** Native Windows x64 when a Windows build host is available
+- **Source media:** User-supplied Original Xbox DVD image for *OutRun 2*
+- **Design baseline:** `/home/deck/Documents/OutRun2 Xbox Static/OutRun 2 Original Xbox Static Recomp Design Document.md`
 
 ## 1. Objective and Planning Assumptions
 
-The objective is to produce a Windows-compatible x64 build of the 2004 Original Xbox version of
-*OutRun 2* by statically recompiling `default.xbe`, while keeping deterministic Linux validation
-available through the SDK's headless harness.
+The objective is to produce a Windows-compatible x64 build of the 2004 Original Xbox version of *OutRun 2* by statically recompiling `default.xbe`, while keeping deterministic Linux validation available through the SDK's headless harness.
 
-The immediate playable target is the current Linux Steam Deck environment. The preferred first
-playable build is a cross-compiled Windows executable run through Wine, Bottles, or Proton. Native
-Windows remains the eventual release target. A native Linux Vulkan runtime is a later alternative,
-not a prerequisite for the first playable build.
+The immediate playable target is the current Linux Steam Deck environment. The preferred first playable build is a cross-compiled Windows executable run through Wine, Bottles, or Proton. Native Windows remains the eventual release target. A native Linux Vulkan runtime is a later alternative, not a prerequisite for the first playable build.
 
 The target is a **PC port**, not software intended to run on Original Xbox hardware.
 
@@ -25,14 +20,10 @@ The plan assumes:
 - The user owns or otherwise has lawful access to an Original Xbox *OutRun 2* disc image.
 - The ISO, extracted game assets, generated lifted code, and game-specific keys remain local.
 - Version 1.0 prioritizes faithful boot, menus, gameplay, audio, input, saves, and frame pacing.
-- Modern presentation features and online-service emulation are deferred until the original
-  game is stable.
-- A clean-room reference implementation is allowed to use the public
-  [XboxXBERecomp SDK](https://github.com/TGP482/XboxXBERecomp), but no original game code or assets
-  are redistributed with the project.
+- Modern presentation features and online-service emulation are deferred until the original game is stable.
+- A clean-room reference implementation is allowed to use the public [XboxXBERecomp SDK](https://github.com/TGP482/XboxXBERecomp), but no original game code or assets are redistributed with the project.
 
-A successful result is a build that starts from the user's own disc, reaches the title screen,
-plays a complete race, saves progress, and remains stable across repeated sessions.
+A successful result is a build that starts from the user's own disc, reaches the title screen, plays a complete race, saves progress, and remains stable across repeated sessions.
 
 ## 2. Scope Boundaries
 
@@ -57,15 +48,13 @@ plays a complete race, saves progress, and remains stable across repeated sessio
 - Ultrawide rendering, HDR10, arbitrary high frame rates, and custom music.
 - A native Linux Vulkan, macOS, Android, or console backend.
 - A polished end-user launcher.
-- Steering-wheel force feedback unless the Phase 0 audit proves it is required for the original
-  game to function.
+- Steering-wheel force feedback unless the Phase 0 audit proves it is required for the original game to function.
 
 These items remain valid post-1.0 candidates, but they must not delay the core port.
 
 ## 3. Corrections to the Initial Design Document
 
-The upstream toolchain and command sequence in the design document are broadly sound. The following
-details should be corrected before implementation:
+The upstream toolchain and command sequence in the design document are broadly sound. The following details should be corrected before implementation:
 
 | Design-document statement | Planning decision |
 | --- | --- |
@@ -78,56 +67,39 @@ details should be corrected before implementation:
 | The `takedawn` Vulkan/Metal claims, exact verifier timing, and compilation timings are established. | Treat these as unverified until they are measured or supported by primary documentation. |
 | Emulator issue reports are direct evidence of current runtime defects. | Treat them as investigation leads only. Reproduce each failure in the new runtime before designing a fix. |
 
-The `xbe_symbols`, `xbe2pe.py`, `add_xbe_image`, `X86_FUNC`, `gpu::Extension`, `app::kGame`, and
-`XLaunchNewImage` interfaces were confirmed in current upstream documentation.
+The `xbe_symbols`, `xbe2pe.py`, `add_xbe_image`, `X86_FUNC`, `gpu::Extension`, `app::kGame`, and `XLaunchNewImage` interfaces were confirmed in current upstream documentation.
 
 ## 4. Architecture Decision
 
 ### Recommended baseline
 
-Use the public [XboxXBERecomp SDK](https://github.com/TGP482/XboxXBERecomp) as the architectural
-base and the [PGR2 recomp project](https://github.com/hk21x/pgr2-recomp) as the closest implementation
-reference.
+Use the public [XboxXBERecomp SDK](https://github.com/TGP482/XboxXBERecomp) as the architectural base and the [PGR2 recomp project](https://github.com/hk21x/pgr2-recomp) as the closest implementation reference.
 
 Phase 0 compared these revisions:
 
 1. Canonical `TGP482/XboxXBERecomp` at `cc9edda3a821a4204dc28783f429b88a27ade4f9`.
-2. The `hk21x/XboxXBERecomp` fork used by `pgr2-recomp` at
-   `b908ae7f05908ff335f94037c673e4b437c7c1d6`.
+2. The `hk21x/XboxXBERecomp` fork used by `pgr2-recomp` at `b908ae7f05908ff335f94037c673e4b437c7c1d6`.
 3. The `pgr2-recomp` game-side configuration and scripts.
 
-The **selected baseline is the `hk21x` fork**, pinned at
-`b908ae7f05908ff335f94037c673e4b437c7c1d6`. It is newer, retains the upstream `fs:` and SEH
-translation, adds ordered push-buffer recording and fixups, and includes the Linux headless harness
-and Ghidra scripts needed for this title's evidence path. Canonical upstream remains the
-compatibility fallback and the source for any runtime fix that must be proposed upstream.
+The **selected baseline is the `hk21x` fork**, pinned at `b908ae7f05908ff335f94037c673e4b437c7c1d6`. It is newer, retains the upstream `fs:` and SEH translation, adds ordered push-buffer recording and fixups, and includes the Linux headless harness and Ghidra scripts needed for this title's evidence path. Canonical upstream remains the compatibility fallback and the source for any runtime fix that must be proposed upstream.
 
-The Ghidra audit confirmed that the fork recognizes every raw NV2A command method found in this
-XBE. The selection is therefore no longer provisional.
+The Ghidra audit confirmed that the fork recognizes every raw NV2A command method found in this XBE. The selection is therefore no longer provisional.
 
 ### Runtime boundaries
 
 - The guest Xbox executable remains the source of game behavior.
-- Xbox kernel, XDK, Direct3D 8, DirectSound, XInput, and XNet calls are supplied by the host
-  runtime.
-- Game-specific fixes belong in `config/outrun2.toml`, `src/game/`, or narrowly scoped runtime
-  changes.
+- Xbox kernel, XDK, Direct3D 8, DirectSound, XInput, and XNet calls are supplied by the host runtime.
+- Game-specific fixes belong in `config/outrun2.toml`, `src/game/`, or narrowly scoped runtime changes.
 - Generated lifted code is never edited or committed.
 
 ### Deployment lanes
 
-1. **Linux headless harness:** the primary development and regression lane. It runs the guest code,
-   host runtime, scripted input, CPU reference renderer, frame logs, and network tests without a
-   window or GPU.
-2. **Windows-compatible executable:** a cross-built executable run through Wine, Bottles, or
-   Proton. This is the first playable Steam Deck lane and preserves the upstream Direct3D 12,
-   XAudio2, and DirectInput implementation.
-3. **Native Windows x64:** the eventual release build when a Windows build host becomes available.
-4. **Native Linux Vulkan:** deferred. It would require a separate renderer backend and is not on
-   the critical path.
+1. **Linux headless harness:** The primary development and regression lane. It runs the guest code, host runtime, scripted input, CPU reference renderer, frame logs, and network tests without a window or GPU.
+2. **Windows-compatible executable:** A cross-built executable run through Wine, Bottles, or Proton. This is the first playable Steam Deck lane and preserves the upstream Direct3D 12, XAudio2, and DirectInput implementation.
+3. **Native Windows x64:** The eventual release build when a Windows build host becomes available.
+4. **Native Linux Vulkan:** Deferred. It would require a separate renderer backend and is not on the critical path.
 
-The implementation follows the existing `hk21x` harness, launcher, diagnostic, and recompiler
-patterns rather than inventing a second runtime.
+The implementation follows the existing `hk21x` harness, launcher, diagnostic, and recompiler patterns rather than inventing a second runtime.
 
 ### Windows cross-build route
 
@@ -136,14 +108,10 @@ The preferred cross-build proof uses the upstream Clang-based toolchain rather t
 - Clang 19 or newer targeting `x86_64-pc-windows-msvc`.
 - An `xwin`-splat Windows SDK and UCRT sysroot.
 - LLD for the final Windows link.
-- The developer model (`XBE_GAME_DLL` disabled), so the executable links the generated game code
-  directly and does not stage Windows `clang.exe` or `lld-link.exe` at runtime.
+- The developer model (`XBE_GAME_DLL` disabled), so the executable links the generated game code directly and does not stage Windows `clang.exe` or `lld-link.exe` at runtime.
 - A small game-side CMake toolchain file, rather than a broad fork of the SDK runtime.
 
-The first playable test should use Proton's vkd3d path for Direct3D 12. If Wine's
-`d3dcompiler_47` cannot compile a runtime shader, install the native Microsoft DLL or switch to the
-SDK's existing Direct3D 11 backend under DXVK. The release model's first-start compiler is not
-part of the Linux cross-build.
+The first playable test should use Proton's vkd3d path for Direct3D 12. If Wine's `d3dcompiler_47` cannot compile a runtime shader, install the native Microsoft DLL or switch to the SDK's existing Direct3D 11 backend under DXVK. The release model's first-start compiler is not part of the Linux cross-build.
 
 ## 5. Repository Shape
 
@@ -171,54 +139,31 @@ outrun-2-xbox-recomp/
     └── verification.md        # Verification matrix and exit criteria
 ```
 
-The repository must enforce ignores for `assets/`, `generated/`, `.local/`, crash dumps, logs, and
-user data. A tracked-file audit is part of every release gate.
+The repository must enforce ignores for `assets/`, `generated/`, `.local/`, crash dumps, logs, and user data. A tracked-file audit is part of every release gate.
 
 ## 6. Phased Delivery Plan
 
 ### Phase 0: Media Intake and Feasibility Spike
 
-**Goal:** Establish that the target disc and existing runtime can support a viable PC port before
-building a full game project.
+**Goal:** Establish that the target disc and existing runtime can support a viable PC port before building a full game project.
 
 #### Completed baseline
 
-- The supplied European ISO was inventoried without modification. Its identity and XDVDFS tree are
-  recorded in `docs/evidence/phase0/media-inventory.md`.
+- The supplied European ISO was inventoried without modification. Its identity and XDVDFS tree are recorded in `docs/evidence/phase0/media-inventory.md`.
 - `default.xbe` was exported and identified as the signed European `SE-054` title `53450036`.
-- `xbe_symbols` matched XDK `5849`, reported **64 partitions**, and found 186 of 278 known functions
-  plus 12 of 13 known data objects.
-- `update.xbe` and `dashupdate.xbe` were classified as the Online Updater Application and Xbox
-  Dashboard Updater. They are not gameplay images unless an `XLaunchNewImage` reference proves
-  otherwise.
+- `xbe_symbols` matched XDK `5849`, reported **64 partitions**, and found 186 of 278 known functions plus 12 of 13 known data objects.
+- `update.xbe` and `dashupdate.xbe` were classified as the Online Updater Application and Xbox Dashboard Updater. They are not gameplay images unless an `XLaunchNewImage` reference proves otherwise.
 - A flat PE was exported for Ghidra and its SHA-256 was recorded.
-- `xbe_recomp` accepted the complete XBE and generated all 64 partitions: 12,691 functions, 721,662
-  instructions, 359 jump tables, and 96 MiB of private C++ output.
-- The generated C++ compiled into the Linux headless harness. A sixty-second run booted the real
-  disc, initialized the Xbox kernel, created a 640×480 device, and reached frame 2,340 with 14,168
-  draws. `XBE_PERF` confirmed a 60-frame-per-second startup/menu interval from frames 240–720.
-  Reference captures rendered the Sega AM2 and Sumo Digital startup screens without an instruction
-  trap.
-- Ghidra found 547 `FS:`-prefixed instructions in 200 containing function labels. Both SDK
-  candidates implement the required `fs_base` translation and SEH support.
-- Ghidra found seven direct `BeginPush`/`EndPush` call sites containing nine push sequences. Those
-  sequences use only NV2A methods `0x17FC` and `0x1818`, both recognized by the selected SDK. No
-  `CreatePushBuffer` or `RunPushBuffer` reference was found.
-- Both CVM containers were inventoried. The 15 `.SFD` files are MPEG-1 Program Streams; no Bink or
-  `.xmv` media was found.
-- The 92 unmatched functions were classified against the XBE's `.XTLID` table. No symbol with an
-  export ID present in the XBE remains unresolved.
-- The input path uses four standard XInput ports and standard rumble state. No wheel-specific XID
-  packet path was found, so native force feedback is not a Version 1.0 blocker.
-- Both SDK candidates were inspected. The `hk21x` fork additionally provides ordered push-buffer
-  recording, fixups, and the required headless diagnostics.
-- The Linux-to-Windows developer build succeeded with Clang 20, LLD, and an `xwin` Windows SDK
-  sysroot. GE-Proton 11 and vkd3d-proton rendered the Sega startup screen, profile creation, and a
-  3D tunnel scene on the Steam Deck.
-- The first playable run exposed a null default FVF shader object. Ghidra traced the guest
-  initialization to `0x1A67C8`; the title-specific `D3D_FvfShader` data override removes the former
-  profile-scene access violation. Independent fixed-build runs lasted 203 and 186 seconds without a
-  crash.
+- `xbe_recomp` accepted the complete XBE and generated all 64 partitions: 12,691 functions, 721,662 instructions, 359 jump tables, and 96 MiB of private C++ output.
+- The generated C++ compiled into the Linux headless harness. A sixty-second run booted the real disc, initialized the Xbox kernel, created a 640×480 device, and reached frame 2,340 with 14,168 draws. `XBE_PERF` confirmed a 60-frame-per-second startup/menu interval from frames 240–720. Reference captures rendered the Sega AM2 and Sumo Digital startup screens without an instruction trap.
+- Ghidra found 547 `FS:`-prefixed instructions in 200 containing function labels. Both SDK candidates implement the required `fs_base` translation and SEH support.
+- Ghidra found seven direct `BeginPush`/`EndPush` call sites containing nine push sequences. Those sequences use only NV2A methods `0x17FC` and `0x1818`, both recognized by the selected SDK. No `CreatePushBuffer` or `RunPushBuffer` reference was found.
+- Both CVM containers were inventoried. The 15 `.SFD` files are MPEG-1 Program Streams; no Bink or `.xmv` media was found.
+- The 92 unmatched functions were classified against the XBE's `.XTLID` table. No symbol with an export ID present in the XBE remains unresolved.
+- The input path uses four standard XInput ports and standard rumble state. No wheel-specific XID packet path was found, so native force feedback is not a Version 1.0 blocker.
+- Both SDK candidates were inspected. The `hk21x` fork additionally provides ordered push-buffer recording, fixups, and the required headless diagnostics.
+- The Linux-to-Windows developer build succeeded with Clang 20, LLD, and an `xwin` Windows SDK sysroot. GE-Proton 11 and vkd3d-proton rendered the Sega startup screen, profile creation, and a 3D tunnel scene on the Steam Deck.
+- The first playable run exposed a null default FVF shader object. Ghidra traced the guest initialization to `0x1A67C8`; the title-specific `D3D_FvfShader` data override removes the former profile-scene access violation. Independent fixed-build runs lasted 203 and 186 seconds without a crash.
 
 #### Remaining tasks
 
@@ -240,23 +185,18 @@ Phase 0 passes only if all of the following are true:
 - XDK `5849` signatures match, and the generated configuration uses 64 partitions.
 - The `fs:` implementation is confirmed statically and scheduled for runtime verification.
 - Every raw push command emitted by the nine identified sequences is covered by the selected SDK.
-- The video inventory is complete, and the input-device and unmatched-symbol audits have explicit
-  outcomes.
-- The generated C++ compiles and links into the Linux headless harness without unresolved
-  instruction failures.
-- A Linux-to-Windows cross-build route is selected and proven with a minimal executable that starts
-  under the available Wine or Proton environment.
+- The video inventory is complete, and the input-device and unmatched-symbol audits have explicit outcomes.
+- The generated C++ compiles and links into the Linux headless harness without unresolved instruction failures.
+- A Linux-to-Windows cross-build route is selected and proven with a minimal executable that starts under the available Wine or Proton environment.
 - No copyrighted media, generated game code, or keys are tracked by Git.
 
 #### Stop conditions
 
-Stop and revise the architecture if a runtime test finds an unsupported push command or proves that
-`fs:`/SEH translation is incomplete.
+Stop and revise the architecture if a runtime test finds an unsupported push command or proves that `fs:`/SEH translation is incomplete.
 
 ### Phase 1: Reproducible Skeleton and Title/Menu Boot
 
-**Goal:** Produce the first Linux headless boot and the first Windows-compatible executable that
-reach the title screen and menus.
+**Goal:** Produce the first Linux headless boot and the first Windows-compatible executable that reach the title screen and menus.
 
 #### Tasks
 
@@ -270,15 +210,13 @@ reach the title screen and menus.
 8. Add deterministic input replay for title and menu navigation.
 9. Capture a crash dump and symbol map for every unresolved failure.
 10. Establish a local manifest of required disc files and their hashes.
-11. Measure the game's update and presentation cadence from the running build and record whether the
-    simulation is 60 Hz, 30 Hz, or variable.
+11. Measure the game's update and presentation cadence from the running build and record whether the simulation is 60 Hz, 30 Hz, or variable.
 12. Exercise an SEH or C++ exception path that reaches the guest's `fs:[0]` chain.
 
 #### Exit gate
 
 - A clean source checkout builds the Linux headless application on the current Steam Deck host.
-- A clean source checkout cross-builds a Windows-compatible executable and starts it through the
-  selected Wine, Bottles, or Proton path.
+- A clean source checkout cross-builds a Windows-compatible executable and starts it through the selected Wine, Bottles, or Proton path.
 - The executable reaches the title screen without manual debugger intervention.
 - Every menu can be entered and exited with scripted input.
 - The title screen and each menu have repeatable PNG evidence.
@@ -288,22 +226,18 @@ reach the title screen and menus.
 
 ### Phase 2: Race Rendering and Simulation Parity
 
-**Goal:** Complete a race on the original, measured simulation cadence without visual or timing
-defects.
+**Goal:** Complete a race on the original, measured simulation cadence without visual or timing defects.
 
 #### Tasks
 
 1. Capture one course at a fixed baseline resolution with no modern enhancements enabled.
-2. Use the headless reference renderer to validate draw lists, road surfaces, car geometry, lighting,
-   palettes, textures, and HUD placement.
+2. Use the headless reference renderer to validate draw lists, road surfaces, car geometry, lighting, palettes, textures, and HUD placement.
 3. Reproduce and fix menu texture swizzling and car-selector behavior if present.
 4. Confirm bound-resource lifetime by running through repeated course transitions.
-5. Verify ordered push-buffer handling in the selected SDK and extend it only if the Phase 0 audit
-   found an unsupported command pattern.
+5. Verify ordered push-buffer handling in the selected SDK and extend it only if the Phase 0 audit found an unsupported command pattern.
 6. Separate simulation cadence from render presentation and enforce the cadence measured in Phase 1.
 7. Measure frame timing with `XBE_PERF`; do not infer frame rate from visual appearance alone.
-8. Complete one course end to end in the headless harness, then in the Windows-compatible executable
-   under Wine, Bottles, or Proton.
+8. Complete one course end to end in the headless harness, then in the Windows-compatible executable under Wine, Bottles, or Proton.
 9. Repeat the course across all five courses.
 
 #### Exit gate
@@ -322,10 +256,8 @@ defects.
 #### Tasks
 
 1. Validate all available game modes and progression unlocks.
-2. Verify music, effects, and voice clips, including transitions where the original may truncate
-   speech.
-3. Reproduce the reported pause-menu restart problem and fix it at the responsible synchronization
-   boundary.
+2. Verify music, effects, and voice clips, including transitions where the original may truncate speech.
+3. Reproduce the reported pause-menu restart problem and fix it at the responsible synchronization boundary.
 4. Implement keyboard and mouse fallback using a virtual controller port.
 5. Validate hot-plug, remapping, and rumble for supported SDL3 controllers.
 6. Verify that standard controller axes, buttons, and rumble work through the Wine or Proton path.
@@ -343,8 +275,7 @@ defects.
 
 ### Phase 4: System Link and Steam Deck Packaging
 
-**Goal:** Deliver a reproducible Linux build and Windows-compatible package for Steam Deck play, and
-verify the supported multiplayer path.
+**Goal:** Deliver a reproducible Linux build and Windows-compatible package for Steam Deck play, and verify the supported multiplayer path.
 
 #### Tasks
 
@@ -352,8 +283,7 @@ verify the supported multiplayer path.
 2. Expand to the supported player count after the two-instance path is stable.
 3. Test direct-IP joining separately from LAN discovery.
 4. Add an asset verifier that checks the supported disc against the local manifest.
-5. Decide between a developer source build and a clean-room launcher that compiles the user's XBE
-   locally.
+5. Decide between a developer source build and a clean-room launcher that compiles the user's XBE locally.
 6. Package the runtime, diagnostics, legal notices, and source-build instructions.
 7. Run a clean-machine reproduction test using only documented prerequisites.
 8. Audit all tracked files and release artifacts for game assets and generated code.
@@ -363,8 +293,7 @@ verify the supported multiplayer path.
 - Two-player System Link completes a race without desynchronization or crash.
 - The supported disc passes the asset verifier.
 - A clean Linux machine can build and launch the game using documented steps.
-- The packaged Windows-compatible executable starts under the selected Steam Deck compatibility
-  layer.
+- The packaged Windows-compatible executable starts under the selected Steam Deck compatibility layer.
 - No tracked or packaged file contains user media or generated lifted code.
 - The release notes accurately state supported regions, revisions, and known limitations.
 
@@ -381,13 +310,11 @@ Evaluate each feature independently:
 - Linux Vulkan runtime.
 - Replacement online lobby service.
 
-Each enhancement requires its own regression gate and must not alter game simulation unless separately
-verified.
+Each enhancement requires its own regression gate and must not alter game simulation unless separately verified.
 
 ## 7. Phase 0 Static Feasibility Audit
 
-The audit uses the flat PE and a Ghidra project containing the `Decomp`, `FindOperand`, and `Callers`
-scripts used by the `pgr2-recomp` reference project.
+The audit uses the flat PE and a Ghidra project containing the `Decomp`, `FindOperand`, and `Callers` scripts used by the `pgr2-recomp` reference project.
 
 | Question | Evidence required | Current result | Remaining gate |
 | --- | --- | --- | --- |
@@ -399,8 +326,7 @@ scripts used by the `pgr2-recomp` reference project.
 | Which XDK build produced the XBE? | `xbe_symbols` output and XBE library versions. | XDK `5849` matched. | Review unmatched entries for actual calls. |
 | What is the actual partition count and code layout? | `xbe_symbols` output and XBE section table. | 64 partitions and 13 code sections were identified. | Use 64 in `add_xbe_image` and validate the first build. |
 
-The `hk21x/XboxXBERecomp` SDK fork includes a `scripts/ghidra/PushBufferScan.java` helper. Reuse it
-only after checking that its addresses and assumptions match the *OutRun 2* XBE.
+The `hk21x/XboxXBERecomp` SDK fork includes a `scripts/ghidra/PushBufferScan.java` helper. Reuse it only after checking that its addresses and assumptions match the *OutRun 2* XBE.
 
 ## 8. Verification Matrix
 
@@ -422,8 +348,7 @@ only after checking that its addresses and assumptions match the *OutRun 2* XBE.
 - Run the complete automated suite only at phase exits.
 - Run focused tests after each hook, runtime, or configuration change.
 - Reuse captures and logs while the corresponding code, media, and configuration are unchanged.
-- Repeat expensive graphics and soak tests after changes that affect timing, resource lifetime,
-  threads, or the renderer.
+- Repeat expensive graphics and soak tests after changes that affect timing, resource lifetime, threads, or the renderer.
 - Treat visual comparisons as supporting evidence; gameplay completion is the primary gate.
 
 ## 9. Primary Risks and Responses
@@ -448,11 +373,7 @@ only after checking that its addresses and assumptions match the *OutRun 2* XBE.
 
 ### Linux and Steam Deck development host
 
-The current workstation is the active development and playtest host. It has Git, CMake, Clang, LLD,
-Python, Java, Cargo, `xdvdfs`, Ghidra 12.1.4, Bottles integration, and several Proton installations.
-RADV exposes Vulkan 1.4.350 on the current AMD GPU. The host lacks native development headers and
-Ninja, so compiler-dependent Linux tools are built in ephemeral Ubuntu containers with Docker/Podman
-instead of changing the host installation.
+The current workstation is the active development and playtest host. It has Git, CMake, Clang, LLD, Python, Java, Cargo, `xdvdfs`, Ghidra 12.1.4, Bottles integration, and several Proton installations. RADV exposes Vulkan 1.4.350 on the current AMD GPU. The host lacks native development headers and Ninja, so compiler-dependent Linux tools are built in ephemeral Ubuntu containers with Docker/Podman instead of changing the host installation.
 
 The host uses three build or validation paths:
 
@@ -460,15 +381,11 @@ The host uses three build or validation paths:
 - A Linux-to-Windows cross-build for the Direct3D 12, XAudio2, and DirectInput executable.
 - Wine, Bottles, or Proton for playable Steam Deck testing of that executable.
 
-The Windows-compatible build must use an established `xwin` or LLVM-MinGW route rather than an
-unverified ad hoc compiler configuration. The cross-build proof is a Phase 0 and Phase 1 gate.
+The Windows-compatible build must use an established `xwin` or LLVM-MinGW route rather than an unverified ad hoc compiler configuration. The cross-build proof is a Phase 0 and Phase 1 gate.
 
 ### Native Windows release host
 
-A native Windows x64 release host is deferred because none is currently available. When one becomes
-available, it should use Windows 10 or 11, Visual Studio 2022 with the C++ Clang tools component,
-CMake, Ninja, LLD, Python, and Git. Native Windows remains the final distribution target, but it is
-not a prerequisite for Linux headless development or Steam Deck playtesting.
+A native Windows x64 release host is deferred because none is currently available. When one becomes available, it should use Windows 10 or 11, Visual Studio 2022 with the C++ Clang tools component, CMake, Ninja, LLD, Python, and Git. Native Windows remains the final distribution target, but it is not a prerequisite for Linux headless development or Steam Deck playtesting.
 
 ### Disc inspection example
 
@@ -483,27 +400,24 @@ sha256sum "/path/to/outrun2.iso"
 sha1sum "assets/default.xbe"
 ```
 
-Use the exact internal path reported by `xdvdfs tree`. Do not treat the Xbox DVD as an ordinary
-ISO filesystem, and do not edit the source image.
+Use the exact internal path reported by `xdvdfs tree`. Do not treat the Xbox DVD as an ordinary ISO filesystem, and do not edit the source image.
 
 ## 11. How to Use the ISO
 
 1. Keep the supplied *OutRun 2* Original Xbox disc image unchanged.
-2. Place it in the local, ignored `assets/` directory or keep it in a separate private asset
-   directory.
+2. Place it in the local, ignored `assets/` directory or keep it in a separate private asset directory.
 3. Inspect it with XDVDFS-aware tools before extracting anything.
 4. Export `default.xbe` and the required data directories.
 5. Record hashes for the source image and XBE.
 6. Build from the local XBE and local media.
 7. Keep the ISO, extracted assets, generated code, saves, and logs out of Git.
 
-The supplied image is:
+The supplied image details are:
 
-`/run/media/deck/SN512/Roms/xbox/OutRun 2 (Europe) (En,Fr,De,Es,It).iso`
+- **Image path:** `/run/media/deck/SN512/Roms/xbox/OutRun 2 (Europe) (En,Fr,De,Es,It).iso`
+- **Outer SHA-256:** `3ebd704fd1eb49401d1ffe1a863582f9e902fdcc6524e87a375883c64afbfcc0`
 
-Its outer SHA-256 is
-`3ebd704fd1eb49401d1ffe1a863582f9e902fdcc6524e87a375883c64afbfcc0`. The image remains on the
-removable volume and is not copied into the repository.
+The image remains on the removable volume and is not copied into the repository.
 
 ## 12. First Ten Working Days
 
@@ -522,10 +436,8 @@ removable volume and is not copied into the repository.
 
 Version 1.0 is complete when:
 
-- A clean Linux checkout builds the headless harness and cross-builds the Windows-compatible
-  executable using only documented prerequisites.
-- The executable starts and is playable on the Steam Deck through the selected Wine, Bottles, or
-  Proton path.
+- A clean Linux checkout builds the headless harness and cross-builds the Windows-compatible executable using only documented prerequisites.
+- The executable starts and is playable on the Steam Deck through the selected Wine, Bottles, or Proton path.
 - The user's supported disc is identified and verified locally.
 - The title screen, menus, all five courses, audio, saves, and supported input work.
 - Race simulation preserves the cadence measured from the original release.
