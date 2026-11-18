@@ -12,6 +12,16 @@ includes = ["game.toml"]
 [data]
 D3D_FvfShader = 0x001A67C8
 
+# OUTRUN MODE's banner draw (FUN_0002AB40 -> FUN_00195CF0 at 0x0002AE36, prim 6, 0x46 indices,
+# stride 0x28) divides 0x7FF by the CDevice's cached vertex size at 0x001A4D18 (+0xBC8) and traps
+# with a divide error because that cache is 0: the SDK's HLE for D3DDevice_SetVertexShader
+# (0x00196DF0) and D3DDevice_SetStreamSource (0x001969D0) replace the guest bodies that fill it
+# (FUN_00196200 / FUN_0019E9E0). FixIndexedVerticesUpLayout caches the draw's own vertex stride
+# before the DIV; see src/game/hooks.cpp and docs/evidence/phase0/outrun-mode-trap.md.
+[[hook]]
+at = 0x00195D09
+call = "FixIndexedVerticesUpLayout"
+
 # Add title-specific entries below, following the examples in config/game.toml:
 #
 # [xbe]

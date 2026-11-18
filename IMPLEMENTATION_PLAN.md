@@ -169,6 +169,7 @@ The repository must enforce ignores for `assets/`, `generated/`, `.local/`, cras
 - The Linux-to-Windows developer build succeeded with Clang 20, LLD, and an `xwin` Windows SDK sysroot. GE-Proton 11 and vkd3d-proton rendered the Sega startup screen, profile creation, and a 3D tunnel scene on the Steam Deck.
 - The first playable run exposed a null default FVF shader object. Ghidra traced the guest initialization to `0x1A67C8`; the title-specific `D3D_FvfShader` data override removes the former profile-scene access violation. Independent fixed-build runs lasted 203 and 186 seconds without a crash.
 - A GitHub Actions pipeline validates every change and builds the code-free host tools on GitHub-hosted runners, while the game executable is built on a dedicated self-hosted runner that holds the user's `default.xbe`. The compiled executable is published only behind an explicit gate, because artifacts of a public repository are public.
+- OUTRUN MODE no longer traps. The divide error at guest `0x00195D6B` came from a zero cached vertex layout in the `CDevice`: the SDK's HLE for `D3DDevice_SetVertexShader` and `D3DDevice_SetStreamSource` replaces the guest bodies that filled it. A hook at `0x00195D09` caches the draw's own stride, and the headless run reaches the race start (`docs/evidence/phase0/outrun-mode-trap.md`).
 
 #### Remaining tasks
 
