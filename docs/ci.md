@@ -65,6 +65,10 @@ an `EXIT` trap. No game image is required on GitHub-hosted runners.
 XBE but contain no game code, so this job is safe on GitHub-hosted runners. The two binaries are
 uploaded as `xbe-tools-linux-<sha>` with 14-day retention.
 
+The shared SDK script only checks that `assets/default.xbe` exists; it never reads it while
+building the tools. `scripts/ci/with-placeholder-xbe.sh` creates an empty placeholder for the
+duration of the build and removes it afterwards, so the job needs no game media.
+
 If the image build proves unreliable on GitHub (network or permissions), set the repository variable
 `CI_TOOLS_NONFATAL` to `true`. The step then has `continue-on-error: true`, the job stays green, and
 the job summary reports that the tools did not build. This is the only escape hatch: by default a
@@ -213,6 +217,12 @@ scripts/ci/setup-runner.sh --no-service   # register and run in the foreground
 scripts/ci/setup-runner.sh --remove       # unregister the runner and stop the service
 systemctl --user status actions-runner    # is it running?
 ```
+
+> **Run exactly one runner instance for this work directory.** Two listeners sharing
+> `_work/` clean each other's job directories: the first job to finish wipes `_work/_temp`
+> while the other is still running, and that job fails with
+> `could not lock config file .../_temp/<id>/.gitconfig: No such file or directory`. The
+> systemd service is the single instance; do not also start `run.sh` by hand.
 
 ### 6.2 The manual way
 
@@ -379,6 +389,7 @@ be published` step and follows the truth table in section 3.
 | `scripts/ci/check-markdown.sh` | Markdown headings and fences |
 | `scripts/ci/check-submodule.sh` | SDK pin |
 | `scripts/ci/dry-run-preflight.sh` | `DRY_RUN=1` container preflight |
+| `scripts/ci/with-placeholder-xbe.sh` | run a command with an empty `assets/default.xbe` when no user media is present |
 | `scripts/ci/setup-runner.sh` | register this machine as the self-hosted runner and install it as a user service |
 | `config/default.xbe.sha1` | pinned SHA-1 of the user's `default.xbe` |
 

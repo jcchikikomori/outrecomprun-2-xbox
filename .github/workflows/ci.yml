@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: true
@@ -94,7 +94,7 @@ jobs:
 
       - name: Upload validation logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ci-validate-logs-${{ github.run_number }}
           path: ci-logs/validate.log
@@ -108,21 +108,23 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: true
 
-      # xbe_symbols and xbe_recomp read an XBE but contain no game code. Set the
-      # CI_TOOLS_NONFATAL repository variable to 'true' only if the container build proves
-      # unreliable on GitHub-hosted runners; the failure is then reported in the summary.
+      # xbe_symbols and xbe_recomp read an XBE but contain no game code. The shared SDK
+      # script only checks that assets/default.xbe exists, so an empty placeholder is enough
+      # here; the helper removes it again.
+      # Set the CI_TOOLS_NONFATAL repository variable to 'true' only if the container build
+      # proves unreliable on GitHub-hosted runners; the failure is then reported in the summary.
       - name: Build xbe_symbols and xbe_recomp
         id: build-tools
         continue-on-error: ${{ vars.CI_TOOLS_NONFATAL == 'true' }}
-        run: scripts/container.sh tools
+        run: scripts/ci/with-placeholder-xbe.sh scripts/container.sh tools
 
       - name: Upload host tools
         if: steps.build-tools.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: xbe-tools-linux-${{ github.sha }}
           path: |
@@ -164,7 +166,7 @@ jobs:
       XBE_PATH: ${{ vars.OUTRUN2_XBE_PATH }}
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           submodules: true
           # Keep .local/xwin, build/ and out/ between runs: the Windows SDK sysroot is a
@@ -245,9 +247,12 @@ jobs:
             echo "file_type: $file_type"
           } > "$STAGING/metadata.txt"
           cat "$STAGING/metadata.txt"
-          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
-          echo "sha_short=${sha256:0:12}" >> "$GITHUB_OUTPUT"
-          echo "size=$size" >> "$GITHUB_OUTPUT"
+          # shellcheck disable=SC2129
+          {
+            echo "sha256=$sha256"
+            echo "sha_short=${sha256:0:12}"
+            echo "size=$size"
+          } >> "$GITHUB_OUTPUT"
           cp -f logs/*.log "$STAGING/logs/" 2>/dev/null || true
 
       - name: Collect logs (always)
@@ -298,7 +303,7 @@ jobs:
 
       - name: Publish Game.exe artifact
         if: steps.gate.outputs.publish == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: OutRun2-Windows-x64-${{ steps.collect.outputs.sha_short }}
           path: ${{ env.STAGING }}/game/Game.exe
@@ -308,7 +313,7 @@ jobs:
 
       - name: Upload build metadata and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ci-build-logs-${{ github.run_number }}
           path: |
@@ -359,7 +364,7 @@ jobs:
       - name: Download the published executable (if any)
         id: game
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: OutRun2-Windows-x64-*
           path: release/game
@@ -368,7 +373,7 @@ jobs:
       - name: Download build metadata and logs
         id: logs
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: ci-build-logs-*
           path: release/logs
