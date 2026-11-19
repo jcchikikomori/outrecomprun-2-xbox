@@ -20,8 +20,9 @@ The plan assumes:
 - The user owns or otherwise has lawful access to an Original Xbox *OutRun 2* disc image.
 - The ISO, extracted game assets, generated lifted code, and game-specific keys remain local.
 - Version 1.0 prioritizes faithful boot, menus, gameplay, audio, input, saves, and frame pacing.
-- Modern presentation features and online-service emulation are deferred until the original game is stable.
+- Modern presentation features and online-service emulation are deferred **until the original game is FULLY STABLE**.
 - A clean-room reference implementation is allowed to use the public [XboxXBERecomp SDK](https://github.com/TGP482/XboxXBERecomp), but no original game code or assets are redistributed with the project.
+- **A simple but similar experience from the other projects such as [BLACK-XBERecomp](https://github.com/TGP482/BLACK-XBERecomp). No compilation in background during gameplay.**
 
 A successful result is a build that starts from the user's own disc, reaches the title screen, plays a complete race, saves progress, and remains stable across repeated sessions.
 
@@ -31,6 +32,7 @@ A successful result is a build that starts from the user's own disc, reaches the
 
 - A reproducible Linux x64 headless build for deterministic validation.
 - A Windows-compatible x64 executable generated from the user's `default.xbe`.
+- Recompile everything from the original game (including shaders), before booting up.
 - A Steam Deck playtest path through Wine, Bottles, or Proton.
 - Boot to the title screen and navigation through the menus.
 - At least one complete race course, followed by coverage of all five OutRun courses.
