@@ -155,6 +155,9 @@ STEAM_COMPAT_APP_ID=53450036 "$PROTON" run 'Z:\path\to\game\Game.exe'
 * The game build runs on a self-hosted runner on this Deck (`steamdeck-outrun2`, labels
   `self-hosted,linux,outrun2-recomp`) because the build needs the user's `default.xbe`.
   Everything else runs on GitHub-hosted runners.
+* **The self-hosted job is not contained**: it runs as the user, with `HOME=/home/deck` —
+  the runner's `_work/` is the only isolated part. Anything in the user's home (dotfiles,
+  caches, symlinks) is visible to the job. This bit us once, see §8.1.
 * **Exactly one runner instance per work directory.** Two listeners share `_work/` and
   delete each other's job directories; the second job then fails with
   `could not lock config file .../_temp/<id>/.gitconfig`.
@@ -162,6 +165,40 @@ STEAM_COMPAT_APP_ID=53450036 "$PROTON" run 'Z:\path\to\game\Game.exe'
   that is still cleaning its temporary directory breaks the next job's checkout.
 * The runner is installed as the user service `actions-runner.service`
   (`scripts/ci/setup-runner.sh`); `loginctl enable-linger` keeps it alive without a login.
+
+### 8.1 The checkout / `.gitconfig` incident (2026-11-19)
+
+Symptom: every `Build Game.exe (self-hosted)` run died at *Check out the repository* with
+`error: could not lock config file /home/deck/.actions-runner/_work/_temp/<uuid>/.gitconfig:
+No such file or directory`, exit 255.
+
+What actually happens, end to end:
+
+1. `actions/checkout` builds a **temporary `$HOME`** to set `safe.directory` without touching
+   the user's real git config (`src/git-auth-helper.ts`, pinned commit `fbc6f399`): it creates
+   `$RUNNER_TEMP/<uuid>/`, copies `$HOME/.gitconfig` into it (`io.cp`), and runs git with
+   `HOME=$RUNNER_TEMP/<uuid>`.
+2. `@actions/io`'s `cp` **copies symlinks verbatim** (`lstat` → `readlink` → `symlink`; no
+   `dereference` option).
+3. The user's `~/.gitconfig` is a **relative** symlink into a dotfiles checkout
+   (`→ .dotfiles/linux/git/.gitconfig`). It resolves fine in the real `$HOME`, but inside the
+   temporary one it dangles, so `git config --global` fails with the ENOENT above and the step
+   aborts.
+4. Checkout then deletes its temporary `$HOME` — which is why a directory watcher makes it
+   look like "something deleted the temp dir mid-job" and sends you chasing a runner race
+   that is not there.
+
+Evidence (all on the machine): the dangling `.gitconfig` was captured from the live
+`_work/_temp` during a run; a local reproduction (`cp -P ~/.gitconfig <dir>/ && HOME=<dir> git
+config --global --add safe.directory /tmp/x`) reproduces the error byte for byte.
+
+Fix: make the symlink absolute (`ln -sf "$(readlink -f ~/.gitconfig)" ~/.gitconfig`) or ship a
+regular file in the dotfiles — otherwise a re-stow recreates the relative link and CI breaks
+again. Re-running CI without fixing anything fails by definition; that was not a counterexample.
+
+Two wrong theories were chased first (the same failure mode as §0): a second runner listener
+sharing `_work/`, and the runner's job-end cleanup racing the next job. Only one listener was
+running; no timer deletes the temp dir; the "deletion" was checkout's own cleanup.
 
 ## 9. Git rules
 
