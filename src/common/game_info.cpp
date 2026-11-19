@@ -20,6 +20,11 @@ const app::GameInfo app::kGame = {
     .ui = nullptr,                        // ImGui drawing each frame
     .pad = nullptr,                       // changes a polled pad
     .rumble = nullptr,                    // changes a rumble before it is set
+    // the title's boot compares the hard disk's voice banks with the ones in media/data1.cvm and fills a bank
+    // descriptor table from it; reads that complete at once win that race with a half-filled table and the title
+    // then stalls in its own heap on a bogus ~2 GB allocation (the headless harness also aborts on its
+    // OUT OF MEMORY assert). Paced as the console's DVD (about 6 MB a second) the boot is reliable.
+    .disc_rate = 6,
     // optional, after these: .achievements (conditions on guest memory), .same_code (other releases' xbe SHA-1s with
     // the same code), .wheel (what a steering wheel's force feedback follows)
 };
