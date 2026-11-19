@@ -2,6 +2,8 @@
 # Cross-build the Windows x64 Game.exe on Linux, in a container.
 #
 #   scripts/cross-build.sh              configure and build out/build/cross-windows/Game.exe
+#                                       and its compiler/ folder (release model: the game's code
+#                                       is built on the player's PC on first start, not here)
 #   RECOMPILE=1 scripts/cross-build.sh  regenerate generated/game from config/outrun2.toml first
 #   DRY_RUN=1 scripts/cross-build.sh    print the container command instead
 #
@@ -18,6 +20,9 @@
 #                                    from the combined config/outrun2.toml before building
 #   JOBS=n                           ninja parallelism, default 3
 #   XWIN_HOME=path                   default: .local/xwin (tool, cache and sysroot, all ignored)
+#   XBE_LLVM_WINDOWS_DIR=path        bin folder of a Windows LLVM (clang.exe, lld-link.exe) the
+#                                    release's compiler folder ships; default: the pinned one
+#                                    cross/fetch-llvm-windows.sh downloads to .local/llvm-windows
 #   CROSS_BUILD_DIR=path             default: out/build/cross-windows
 #   DRY_RUN=1                        print the engine invocation, build nothing
 #
@@ -71,6 +76,9 @@ if [ "${DRY_RUN:-0}" != 1 ]; then
         echo "cross-build: building $IMAGE (first run, a few minutes)"
         $ENGINE build -f "$ROOT/scripts/container/Dockerfile.cross" -t "$IMAGE" "$ROOT/scripts/container"
     fi
+    # the release's compiler folder carries Windows clang.exe/lld-link.exe: this Linux host's
+    # LLVM is ELF, so the pinned Windows LLVM release is fetched into .local/llvm-windows/
+    "$ROOT/cross/fetch-llvm-windows.sh"
 fi
 
 USER_ARGS=(--user "$(id -u):$(id -g)")

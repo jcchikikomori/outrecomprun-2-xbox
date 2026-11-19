@@ -92,11 +92,16 @@ Runs on the labels in the `RUNNER_LABELS` repository variable, defaulting to
    executable for the collect step.
 4. `scripts/container.sh tools`, then `symbols` (rewrites `config/game.toml`), then `recompile`
    (regenerates `generated/game`).
-5. `RECOMPILE=1 scripts/cross-build.sh` with `JOBS` from `CI_JOBS` (default `3`).
-6. Copy `out/build/cross-windows/Game.exe` to staging, and write `metadata.txt` with the commit,
-   run URL, runner, size, SHA-256, pinned XBE SHA-1, build time and `file(1)` output. `logs/*.log`
-   are copied when present. A failure path still uploads whatever logs exist. Staging lives in
-   `.local/ci-staging`, which `.gitignore` already excludes.
+5. `RECOMPILE=1 scripts/cross-build.sh` with `JOBS` from `CI_JOBS` (default `3`). The build is the
+   **release model**: `Game.exe` carries only the runtime and the title's overrides (about 4.6 MiB),
+   and the build stages a `compiler/` folder beside it (`xbe_recomp`, `clang.exe` and `lld-link.exe`
+   for Windows, the game's configs, the XDK layouts and the freestanding headers; about 163 MiB).
+   The staged tools are verified to be Windows PEs; `cross/fetch-llvm-windows.sh` (pinned LLVM
+   release) provides them when the build toolchain itself is not a Windows toolchain.
+6. Copy `out/build/cross-windows/Game.exe` **and `compiler/`** to staging, and write `metadata.txt`
+   with the commit, run URL, runner, sizes, SHA-256s, pinned XBE SHA-1, build time and `file(1)`
+   output. `logs/*.log` are copied when present. A failure path still uploads whatever logs exist.
+   Staging lives in `.local/ci-staging`, which `.gitignore` already excludes.
 7. Evaluate the publish gate and upload artifacts as described in section 3.
 8. Write a job summary with the SHA-256, size and publish decision.
 
@@ -110,8 +115,9 @@ this guard that code would execute on the maintainer's machine. Fork pull reques
 
 On a `v*` tag, after `build` succeeds, the job downloads `OutRun2-Windows-x64-*` and
 `ci-build-logs-*`, writes notes, and creates a **draft** release with
-`gh release create --draft --verify-tag --notes-file`. `Game.exe` is attached only when it was
-published; `metadata.txt` is attached when available. If the artifacts are missing the download
+`gh release create --draft --verify-tag --notes-file`. The release attaches the
+`OutRun2-Windows-x64.zip` (Game.exe + `compiler/`) when it was published, and `metadata.txt`
+when available. If the artifacts are missing the download
 steps continue on error, the job emits a warning, and the draft still carries the copyright notice
 and a note that no executable was published. Re-running the job for an existing tag uploads assets
 with `--clobber` and updates the notes instead of failing.
@@ -126,8 +132,11 @@ git push origin v0.1.0
 
 ## 3. The publish gate
 
-`Game.exe` contains recompiled game code. The build job uploads it **only** when the repository
-variable `PUBLISH_GAME_ARTIFACT` is `true`, or when a manual run sets `publish: true`.
+`Game.exe` carries no recompiled game code: the release model compiles the player's game code
+locally on the first start, behind a progress window, into `Game.dll` (kept across starts). The
+release therefore always contains `Game.exe` **and** `compiler/`; the build job uploads them **only**
+when the repository variable `PUBLISH_GAME_ARTIFACT` is `true`, or when a manual run sets
+`publish: true`.
 
 | Trigger | `PUBLISH_GAME_ARTIFACT` | `publish` input | Executable uploaded |
 | --- | --- | --- | --- |
@@ -151,8 +160,8 @@ summary. The default state of a public repository never contains a redistributed
 | `ci-validate-logs-<run_number>` | validation log | 7 days | always |
 | `xbe-tools-linux-<sha>` | `xbe_symbols`, `xbe_recomp` | 14 days | tools built |
 | `ci-build-logs-<run_number>` | `metadata.txt`, `logs/` | 7 days | always |
-| `OutRun2-Windows-x64-<sha256[0:12]>` | `Game.exe` | 14 days | publish gate open |
-| draft release `v*` | `Game.exe` when published, `metadata.txt` | permanent | publish gate open |
+| `OutRun2-Windows-x64-<sha256[0:12]>` | `Game.exe` + `compiler/` (runtime only; no game code) | 14 days | publish gate open |
+| draft release `v*` | `OutRun2-Windows-x64.zip` (Game.exe + `compiler/`) when published, `metadata.txt` | permanent | publish gate open |
 
 **Artifacts of a public repository are public.** Anyone who can read the repository can download an
 artifact while it exists, and a published release stays downloadable. Setting

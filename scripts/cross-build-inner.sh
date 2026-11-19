@@ -83,3 +83,12 @@ echo "cross-build: $EXE"
 ls -l "$EXE"
 file "$EXE"
 sha256sum "$EXE" | tee logs/cross-sha256.txt
+
+# the release model ships the compiler folder beside the executable (app/game_code.cpp builds
+# the game's DLL from it on the player's first start)
+COMPILER=$BUILD_DIR/compiler
+[ -d "$COMPILER" ] || die "the build finished without the compiler folder $COMPILER"
+echo
+echo "cross-build: $COMPILER"
+ls -l "$COMPILER" "$COMPILER/config" "$COMPILER/include" "$COMPILER/xdk"
+echo "cross-build: compiler folder $(du -sh "$COMPILER" | cut -f1), $(find "$COMPILER" -type f | wc -l) files"

@@ -3,6 +3,14 @@
 # This file is what CMakeLists.txt passes to add_xbe_image(); it includes the generated one first.
 includes = ["game.toml"]
 
+# The release builds this xbe into Game.dll on the player's own PC (sdk/runtime/app/game_code.cpp):
+# the first start runs xbe_recomp on the config in the shipped compiler folder that names the DLL
+# ([xbe] library, which is also what makes the recompiler write the export lists generated/game
+# imports.def and exports.def) and links the result. Read after the include, so the generated
+# path, partitions and symbols above still apply.
+[xbe]
+library = "Game"
+
 # The guest's device init at 0x19A6D0 stores the FVF shader object at 0x1A67C8 into the
 # device's CDevice_VertexShader field (offset 0x794); 0x196D00 dereferences it. SDK 5849
 # has no D3D_FvfShader data signature, so the host HLE Direct3D_CreateDevice cannot fill

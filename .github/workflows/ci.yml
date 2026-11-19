@@ -224,18 +224,30 @@ jobs:
       - name: Cross-build Windows Game.exe
         run: RECOMPILE=1 scripts/cross-build.sh
 
-      - name: Collect the executable and metadata
+      - name: Collect the build and metadata
         id: collect
         run: |
           set -euo pipefail
           exe=out/build/cross-windows/Game.exe
+          compiler=out/build/cross-windows/compiler
           if [ ! -f "$exe" ]; then
             echo "::error::$exe was not produced"
             exit 1
           fi
+          if [ ! -d "$compiler" ]; then
+            echo "::error::$compiler was not produced: the release ships it beside Game.exe (the game's code is built on the player's PC)"
+            exit 1
+          fi
+          # the release layout: game/Game.exe with game/compiler/ beside it, as the game expects
+          mkdir -p "$STAGING/game/compiler"
           cp -f "$exe" "$STAGING/game/Game.exe"
+          # objects a build tree produced by running the game are game-derived: never ship them
+          rm -rf "$compiler/work"
+          cp -a "$compiler/." "$STAGING/game/compiler/"
           sha256=$(sha256sum "$exe" | cut -d' ' -f1)
           size=$(stat -c '%s' "$exe")
+          compiler_size=$(du -sb "$STAGING/game/compiler" | cut -f1)
+          compiler_files=$(find "$STAGING/game/compiler" -type f | wc -l)
           xbe_sha1=$(cut -d' ' -f1 config/default.xbe.sha1)
           if command -v file >/dev/null 2>&1; then
             file_type=$(file -b "$exe")
@@ -247,9 +259,12 @@ jobs:
             echo "ref: $GITHUB_REF"
             echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "runner: $RUNNER_NAME"
+            echo "model: release (XBE_GAME_DLL: the game's code is built on the player's PC)"
             echo "path: out/build/cross-windows/Game.exe"
             echo "size_bytes: $size"
             echo "sha256: $sha256"
+            echo "compiler_dir: compiler ($compiler_files files)"
+            echo "compiler_size_bytes: $compiler_size"
             echo "xbe_sha1: $xbe_sha1"
             echo "built_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             echo "file_type: $file_type"
@@ -260,6 +275,7 @@ jobs:
             echo "sha256=$sha256"
             echo "sha_short=${sha256:0:12}"
             echo "size=$size"
+            echo "compiler_size=$compiler_size"
           } >> "$GITHUB_OUTPUT"
           cp -f logs/*.log "$STAGING/logs/" 2>/dev/null || true
 
@@ -303,18 +319,20 @@ jobs:
             echo
             echo "### Publish gate"
             echo
-            echo "- Executable published: **$publish** ($reason)"
+            echo "- Game build published: **$publish** ($reason)"
             if [ "$publish" != "true" ]; then
-              echo "- \`Game.exe\` is **not** uploaded: this is a public repository and the executable contains recompiled game code."
+              echo "- The game build (\`Game.exe\` and the \`compiler/\` folder beside it) is **not** uploaded: this is a public repository; see \`docs/ci.md\` for the publishing policy."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish Game.exe artifact
+      - name: Publish the game build artifact
         if: steps.gate.outputs.publish == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: OutRun2-Windows-x64-${{ steps.collect.outputs.sha_short }}
-          path: ${{ env.STAGING }}/game/Game.exe
+          # the executable and the compiler folder the player's first start builds the game's code
+          # from, in one folder: extracting the artifact gives Game.exe with compiler/ beside it
+          path: ${{ env.STAGING }}/game/
           retention-days: 14
           if-no-files-found: error
           overwrite: true
@@ -338,6 +356,7 @@ jobs:
           PUBLISH_REASON: ${{ steps.gate.outputs.reason }}
           SHA256: ${{ steps.collect.outputs.sha256 }}
           SIZE: ${{ steps.collect.outputs.size }}
+          COMPILER_SIZE: ${{ steps.collect.outputs.compiler_size }}
           SHORT: ${{ steps.collect.outputs.sha_short }}
         run: |
           {
@@ -348,7 +367,11 @@ jobs:
             if [ -n "${SHA256:-}" ]; then
               mib=$(awk -v bytes="$SIZE" 'BEGIN { printf "%.1f", bytes / 1048576 }')
               echo "- SHA-256: \`$SHA256\`"
-              echo "- Size: $SIZE bytes (~$mib MiB)"
+              echo "- Executable: $SIZE bytes (~$mib MiB), no game code (release model)"
+              if [ -n "${COMPILER_SIZE:-}" ]; then
+                cmib=$(awk -v bytes="$COMPILER_SIZE" 'BEGIN { printf "%.1f", bytes / 1048576 }')
+                echo "- Compiler folder: $COMPILER_SIZE bytes (~$cmib MiB), ships beside the executable"
+              fi
             else
               echo "- No executable was collected; see the \`ci-build-logs-${{ github.run_number }}\` artifact and the failing step."
             fi
@@ -369,7 +392,7 @@ jobs:
       contents: write
       actions: read
     steps:
-      - name: Download the published executable (if any)
+      - name: Download the published game build (if any)
         id: game
         continue-on-error: true
         uses: actions/download-artifact@v7
@@ -387,6 +410,26 @@ jobs:
           path: release/logs
           merge-multiple: true
 
+      - name: Bundle the executable with its compiler folder
+        run: |
+          set -euo pipefail
+          if [ ! -f release/game/Game.exe ]; then
+            echo "no game build was published for this run; nothing to bundle"
+            exit 0
+          fi
+          if [ ! -d release/game/compiler ]; then
+            echo "::error::the game build has no compiler folder; the release model needs it beside the executable"
+            exit 1
+          fi
+          # one archive, so extracting it puts Game.exe and compiler/ side by side as the game expects
+          rm -f release/OutRun2-Windows-x64.zip
+          if command -v zip >/dev/null 2>&1; then
+            ( cd release/game && zip -r -9 -q ../OutRun2-Windows-x64.zip . )
+          else
+            python3 -c 'import pathlib,zipfile; root=pathlib.Path("release/game"); out=pathlib.Path("release/OutRun2-Windows-x64.zip"); z=zipfile.ZipFile(out,"w",zipfile.ZIP_DEFLATED,compresslevel=9); [z.write(p,p.relative_to(root)) for p in sorted(root.rglob("*")) if p.is_file()]; z.close()'
+          fi
+          ls -l release/OutRun2-Windows-x64.zip
+
       - name: Write release notes
         run: |
           set -euo pipefail
@@ -399,11 +442,13 @@ jobs:
           if [ -f release/logs/metadata.txt ]; then
             sha256=$(sed -n 's/^sha256: //p' release/logs/metadata.txt)
             size=$(sed -n 's/^size_bytes: //p' release/logs/metadata.txt)
+            compiler_size=$(sed -n 's/^compiler_size_bytes: //p' release/logs/metadata.txt)
             xbe_sha1=$(sed -n 's/^xbe_sha1: //p' release/logs/metadata.txt)
             built=$(sed -n 's/^built_utc: //p' release/logs/metadata.txt)
           else
             sha256=''
             size=''
+            compiler_size=''
             xbe_sha1=''
             built=''
             echo "::warning::No build metadata artifact was found; the notes carry no hashes."
@@ -418,24 +463,35 @@ jobs:
             echo
             echo "| Field | Value |"
             echo "| --- | --- |"
-            echo "| Executable published | $published |"
-            echo "| SHA-256 | ${sha256:-unknown} |"
-            echo "| Size (bytes) | ${size:-unknown} |"
+            echo "| Game build published | $published |"
+            echo "| SHA-256 of Game.exe | ${sha256:-unknown} |"
+            echo "| Game.exe size (bytes) | ${size:-unknown} |"
+            echo "| Compiler folder size (bytes) | ${compiler_size:-unknown} |"
             echo "| Build time (UTC) | ${built:-unknown} |"
             echo "| Pinned XBE SHA-1 | ${xbe_sha1:-unknown} |"
             echo
             if [ "$published" != yes ]; then
-              echo "**No executable is attached to this draft.** The publish gate was closed for this run"
+              echo "**No game build is attached to this draft.** The publish gate was closed for this run"
               echo "(\`PUBLISH_GAME_ARTIFACT\` is not \`true\` and the dispatch input was not set). Complete the"
-              echo "release by hand after deciding whether the compiled game code may be distributed."
+              echo "release by hand after deciding whether the runtime and the compiler folder may be distributed."
+              echo
+            else
+              echo "## First start builds your game's code"
+              echo
+              echo "The release carries no game code. Extract the whole archive, so that \`Game.exe\` has the"
+              echo "\`compiler\` folder beside it, then start it with your own disc in \`assets/\`. The first start"
+              echo "recompiles your \`default.xbe\` into \`Game.dll\` beside the executable behind a progress"
+              echo "window; that needs about 1 GB of free space and a few minutes, once. Nothing is compiled"
+              echo "while the game runs, and finished work is kept, so a closed window or a crash only loses"
+              echo "the files that were in progress."
               echo
             fi
             echo "## You still need your own copy of the game"
             echo
-            echo "The executable is a static recompilation of the Xbox game code. It contains no game media:"
-            echo "no \`default.xbe\`, no disc image, no extracted CVM/SFD assets, and no generated recompiled"
-            echo "source. It is only useful together with a legally acquired copy of *OutRun 2* for the"
-            echo "original Xbox. Point it at your own \`assets/OutRun2.iso\` or an extracted \`assets/\` folder."
+            echo "The release contains no game media: no \`default.xbe\`, no disc image, no extracted CVM/SFD"
+            echo "assets and no generated recompiled source. The game's code is translated from the"
+            echo "\`default.xbe\` on your own legally acquired *OutRun 2* for the original Xbox, on your own PC."
+            echo "Point \`Game.exe\` at your own \`assets/OutRun2.iso\` or an extracted \`assets/\` folder."
             echo
             echo "The Windows executable needs the Microsoft Visual C++ 2015-2022 x64 runtime under"
             echo "Wine or Proton; the Windows SDK and UCRT are not bundled."
@@ -457,8 +513,9 @@ jobs:
           tag=$GITHUB_REF_NAME
           args=(--draft --verify-tag --title "OutRun 2 (Xbox) recompilation $tag" --notes-file release/RELEASE_NOTES.md)
           files=()
-          if [ -f release/game/Game.exe ]; then
-            files+=(release/game/Game.exe)
+          # the executable and its compiler folder are one archive (see the bundle step)
+          if [ -f release/OutRun2-Windows-x64.zip ]; then
+            files+=(release/OutRun2-Windows-x64.zip)
           fi
           if [ -f release/logs/metadata.txt ]; then
             files+=(release/logs/metadata.txt)
