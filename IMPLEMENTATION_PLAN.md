@@ -33,6 +33,8 @@ A successful result is a build that starts from the user's own disc, reaches the
 - A reproducible Linux x64 headless build for deterministic validation.
 - A Windows-compatible x64 executable generated from the user's `default.xbe`.
 - Recompile everything from the original game (including shaders), before booting up.
+- To compile the shaders, we can dump the shader cache being generated, then we will use it for recompilation to minimize stutters in-game.
+- Minimum graphics pipeline should be DirectX 9, since the game and the console runs on DirectX 8.
 - A Steam Deck playtest path through Wine, Bottles, or Proton.
 - Boot to the title screen and navigation through the menus.
 - At least one complete race course, followed by coverage of all five OutRun courses.
