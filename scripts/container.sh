@@ -32,12 +32,15 @@ die() { echo "container: $*" >&2; exit 1; }
 
 ENGINE=${CONTAINER_ENGINE:-}
 if [ -z "$ENGINE" ]; then
-    if command -v docker >/dev/null 2>&1; then
-        ENGINE=docker
-    elif command -v podman >/dev/null 2>&1; then
-        ENGINE=podman
-    else
-        die "install docker or podman, or set CONTAINER_ENGINE"
+    # the runner's service PATH can miss where the engine is installed (linuxbrew, rootless, /usr/local)
+    for dir in "$(dirname "$(command -v docker podman 2>/dev/null | head -1)" 2>/dev/null)" \
+              "$HOME/.local/bin" "$HOME/linuxbrew/.linuxbrew/bin" /home/linuxbrew/.linuxbrew/bin \
+              /usr/local/bin /usr/bin /snap/bin; do
+        [ -n "$dir" ] && [ -x "$dir/docker" ] && { ENGINE="$dir/docker"; break; }
+        [ -n "$dir" ] && [ -x "$dir/podman" ] && { ENGINE="$dir/podman"; break; }
+    done
+    if [ -z "$ENGINE" ]; then
+        die "no docker or podman in PATH or the usual install locations; install one, or set CONTAINER_ENGINE to its absolute path"
     fi
 fi
 IMAGE=${IMAGE:-outrun2-xbe-tools:24.04}
@@ -170,7 +173,7 @@ case "$cmd" in
         ensure_image
         ensure_game
         ensure_exe
-        run_cmd "build/linux/xbe_symbols assets/$GAME_XBE sdk/xdk --out config/game.toml"
+        run_cmd "build/linux/xbe_symbols assets/$GAME_XBE sdk/xdk --library $GAME_TARGET.dll --out config/game.toml"
         ;;
     recompile)
         ensure_sdk
@@ -200,7 +203,7 @@ case "$cmd" in
         ensure_own_build_dir
         steps="set -e; scripts/linux-tools.sh"
         if [ "${FORCE:-0}" = 1 ] || ! grep -q '^\[symbols\]' config/game.toml 2>/dev/null; then
-            steps="$steps; build/linux/xbe_symbols assets/$GAME_XBE sdk/xdk --out config/game.toml"
+            steps="$steps; build/linux/xbe_symbols assets/$GAME_XBE sdk/xdk --library $GAME_TARGET.dll --out config/game.toml"
         fi
         steps="$steps; scripts/recompile.sh; scripts/harness.sh $(quote_args "$@")"
         run_cmd "$steps"
