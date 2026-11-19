@@ -174,6 +174,7 @@ The repository must enforce ignores for `assets/`, `generated/`, `.local/`, cras
 - The first playable run exposed a null default FVF shader object. Ghidra traced the guest initialization to `0x1A67C8`; the title-specific `D3D_FvfShader` data override removes the former profile-scene access violation. Independent fixed-build runs lasted 203 and 186 seconds without a crash.
 - A GitHub Actions pipeline validates every change and builds the code-free host tools on GitHub-hosted runners, while the game executable is built on a dedicated self-hosted runner that holds the user's `default.xbe`. The compiled executable is published only behind an explicit gate, because artifacts of a public repository are public.
 - OUTRUN MODE no longer traps. The divide error at guest `0x00195D6B` came from a zero cached vertex layout in the `CDevice`: the SDK's HLE for `D3DDevice_SetVertexShader` and `D3DDevice_SetStreamSource` replaces the guest bodies that filled it. A hook at `0x00195D09` caches the draw's own stride, and the headless run reaches the race start (`docs/evidence/phase0/outrun-mode-trap.md`).
+- The SDK fork merged the Direct3D 9 renderer fork (`bechapm/XboxXBERecomp-D3D9`) behind the new `renderer` settings key, and restored the headless harness and the `hk21x` helper scripts the project tooling expects. After the runtime's Linux-compat bring-up, the headless boot of the extracted disc data reaches frame 720 at the measured 60 Hz cadence with 1431 draws and no traps. The playable lane now has two renderer options: `d3d12` (vkd3d-proton) and `d3d9` (DXVK), with D3D9 as the plan's minimum pipeline.
 
 #### Remaining tasks
 
@@ -415,13 +416,24 @@ Use the exact internal path reported by `xdvdfs tree`. Do not treat the Xbox DVD
 
 ## 11. How to Use the ISO
 
-1. Keep the supplied *OutRun 2* Original Xbox disc image unchanged.
-2. Place it in the local, ignored `assets/` directory or keep it in a separate private asset directory.
-3. Inspect it with XDVDFS-aware tools before extracting anything.
-4. Export `default.xbe` and the required data directories.
-5. Record hashes for the source image and XBE.
-6. Build from the local XBE and local media.
+The running game never reads the disc image. Every lane consumes an **extracted asset tree** in the local, ignored `assets/` directory, next to `default.xbe`:
+
+1. Keep the supplied *OutRun 2* Original Xbox disc image unchanged; it is the extraction input, not a runtime dependency.
+2. Inspect it with XDVDFS-aware tools before extracting anything (`xdvdfs tree`, `xdvdfs checksum`).
+3. Export `default.xbe` and the game's data directories into `assets/`:
+
+   ```bash
+   xdvdfs copy-out "assets/OutRun2.iso" "/media" "assets/"
+   mkdir -p assets/media && mv assets/data*.cvm assets/media/
+   ```
+
+   `xdvdfs copy-out` flattens directories, so move the extracted files into their original layout (`D:\media\data1.cvm` becomes `assets/media/data1.cvm`).
+4. Record hashes for the source image, the XBE, and the extracted files; a later asset verifier (Phase 4) rejects a tree that does not match the manifest.
+5. The headless harness mounts `assets/` as `D:` directly and cannot open an ISO itself (the disc-mounting code lives in the Windows-only `runtime/app/game_files.cpp`), so validation always runs from the extracted tree.
+6. The Windows-compatible build keeps the ISO as a convenience fallback for players: `game_files.cpp` prefers the extracted files and otherwise opens an ISO found in `assets/` through the runtime's own XDVDFS parser (`runtime/kernel/disc.cpp`). The disc-read pacing fix applies to that fallback path only.
 7. Keep the ISO, extracted assets, generated code, saves, and logs out of Git.
+
+Current extracted tree: `assets/default.xbe`, `assets/media/data1.cvm` (755 MB), `assets/media/data2.cvm` (320 MB).
 
 The supplied image details are:
 
