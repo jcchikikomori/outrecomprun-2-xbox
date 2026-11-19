@@ -450,6 +450,8 @@ jobs:
       - name: Create or update the draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          # no checkout in this job: gh must not guess the repository from git
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag=$GITHUB_REF_NAME
