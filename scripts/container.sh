@@ -40,7 +40,12 @@ if [ -z "$ENGINE" ]; then
         [ -n "$dir" ] && [ -x "$dir/podman" ] && { ENGINE="$dir/podman"; break; }
     done
     if [ -z "$ENGINE" ]; then
-        die "no docker or podman in PATH or the usual install locations; install one, or set CONTAINER_ENGINE to its absolute path"
+        {
+            echo "container: no docker or podman in PATH or the usual install locations; install one, or set CONTAINER_ENGINE to its absolute path"
+            echo "container: PATH=$PATH" >&2
+            echo "container: HOME=$HOME user=$(id -un) host=$(hostname)" >&2
+        } >&2
+        exit 1
     fi
 fi
 IMAGE=${IMAGE:-outrun2-xbe-tools:24.04}
